@@ -183,9 +183,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
   if (!apartment) return null;
 
   const panoramaSrc = resolveApartmentPanoramaSrc(apartment);
-  const hasAnyVirtualTour = Boolean(
-    (apartment.hasVirtualTour && panoramaSrc) || apartment.virtualTourUrl
-  );
+  const hasAnyVirtualTour = false;
 
   const effectiveCommissionRatePct = getCategoryCommissionPct(
     apartment.category,
@@ -198,7 +196,11 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
     (b) => b.apartmentId === apartment.id
   );
   const isBookedByCurrentUser = Boolean(
-    matchingTenantBooking || (currentUserUid && currentUserUid === apartment.ownerId)
+    (matchingTenantBooking &&
+      (matchingTenantBooking.status === 'escrow_paid' ||
+        matchingTenantBooking.status === 'completed' ||
+        Boolean(matchingTenantBooking.paymentReference))) ||
+      (currentUserUid && currentUserUid === apartment.ownerId)
   );
   const unlockedContact = resolveUnlockedApartmentContact(apartment, isBookedByCurrentUser);
 
@@ -497,17 +499,6 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                     </div>
                   </>
                 )}
-
-                {panoramaSrc && (
-                  <button
-                    type="button"
-                    onClick={() => setMediaMode('360')}
-                    className="absolute bottom-4 end-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950/80 hover:bg-slate-950 text-white text-xs font-semibold backdrop-blur-md transition-colors whitespace-nowrap shrink-0 shadow-md"
-                  >
-                    <Compass className="w-4 h-4 text-blue-400" />
-                    <span>{t('بدء الجولة الافتراضية 360°', 'Launch 360° Virtual Tour')}</span>
-                  </button>
-                )}
               </div>
 
               {/* Thumbnail Strip */}
@@ -708,7 +699,26 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                     </span>
                   </span>
                 </div>
-                <p className="text-sm text-slate-600 leading-relaxed">{apartment.description}</p>
+                {isBookedByCurrentUser ? (
+                  <p className="text-sm text-slate-700 leading-relaxed bg-emerald-50/40 border border-emerald-200/70 rounded-xl p-3.5">
+                    {apartment.description}
+                  </p>
+                ) : (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-start gap-3 text-xs text-slate-600">
+                    <Lock className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="font-bold text-slate-800">
+                        {t('الوصف التفصيلي الكامل مقفل لحين الدفع', 'Full Detailed Description Locked Until Payment')}
+                      </div>
+                      <p className="leading-relaxed">
+                        {t(
+                          'يتم فتح الوصف الكامل للمكان والعنوان الدقيق ورقم المالك تلقائياً فور إتمام دفع الحجز عبر المنصة.',
+                          'Full unit description, exact address, and landlord phone number unlock automatically right after payment.'
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {apartment.category !== 'whole_house' &&
                   (apartment.houseHasPrivateGarage || apartment.houseHasGardenOrRoof) && (

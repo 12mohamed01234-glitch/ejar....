@@ -1,13 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
-  Map as GoogleMap,
-  AdvancedMarker,
-  useMap,
-  MapCameraChangedEvent,
-} from '@vis.gl/react-google-maps';
-import { GoogleMapsOverlay } from '@deck.gl/google-maps';
-import { HeatmapLayer } from '@deck.gl/aggregation-layers';
-import {
   Heart,
   Bell,
   BellRing,
@@ -222,99 +214,7 @@ function getDemandBarWidthClass(ratio: number): string {
   return 'w-full';
 }
 
-const MapCameraController: React.FC<{
-  target: { lat: number; lng: number; zoom: number; nonce: number } | null;
-}> = ({ target }) => {
-  const map = useMap('egypt-explorer-map');
-  useEffect(() => {
-    if (!map || !target) return;
-    map.panTo({ lat: target.lat, lng: target.lng });
-    map.setZoom(target.zoom);
-  }, [map, target]);
-  return null;
-};
-
-/**
- * Modern Deck.gl HeatmapLayer + GoogleMapsOverlay replacing deprecated google.maps.visualization.HeatmapLayer
- * Docs: https://developers.google.com/maps/documentation/javascript/examples/deckgl-tripslayer?utm_campaign=gmp_mcp_codeassist_v1_aistudio
- */
-const DeckGlDemandHeatmapOverlay: React.FC<{
-  points: HeatmapDemandPoint[];
-  visible: boolean;
-  radiusPixels: number;
-  onWebGLStatusChange?: (ready: boolean) => void;
-}> = ({ points, visible, radiusPixels, onWebGLStatusChange }) => {
-  const map = useMap('egypt-explorer-map');
-  const overlayRef = useRef<GoogleMapsOverlay | null>(null);
-
-  useEffect(() => {
-    if (!map || !visible) return;
-    if (!detectWebGL2Support()) {
-      onWebGLStatusChange?.(false);
-      return;
-    }
-
-    let overlay: GoogleMapsOverlay | null = null;
-    try {
-      overlay = new GoogleMapsOverlay({ interleaved: false });
-      overlay.setMap(map);
-      overlayRef.current = overlay;
-      onWebGLStatusChange?.(true);
-    } catch (err) {
-      console.warn('Deck.gl Heatmap overlay unavailable in current GPU environment:', err);
-      onWebGLStatusChange?.(false);
-    }
-
-    return () => {
-      if (overlay) {
-        try {
-          overlay.setMap(null);
-          overlay.finalize();
-        } catch {
-          // Ignore WebGL context cleanup errors
-        }
-      }
-      overlayRef.current = null;
-    };
-  }, [map, visible, onWebGLStatusChange]);
-
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    if (!overlay) return;
-    try {
-      if (!visible || points.length === 0) {
-        overlay.setProps({ layers: [] });
-        return;
-      }
-
-      const heatmapLayer = new HeatmapLayer<HeatmapDemandPoint>({
-        id: 'egypt-residential-demand-heatmap',
-        data: points,
-        visible: true,
-        getPosition: (d) => [d.lng, d.lat],
-        getWeight: (d) => d.weight,
-        radiusPixels,
-        intensity: 1.4,
-        threshold: 0.03,
-        aggregation: 'SUM',
-        colorRange: [
-          [20, 184, 166, 95],
-          [14, 165, 233, 145],
-          [250, 204, 21, 185],
-          [249, 115, 22, 220],
-          [225, 29, 72, 245],
-          [159, 18, 57, 255],
-        ],
-      });
-
-      overlay.setProps({ layers: [heatmapLayer] });
-    } catch (err) {
-      console.warn('Deck.gl Heatmap layer update skipped:', err);
-    }
-  }, [points, visible, radiusPixels]);
-
-  return null;
-};
+// Google Maps camera controller & Deck.gl overlay removed — Leaflet handles all map rendering without API key errors.
 
 export const EgyptMapExplorer: React.FC<EgyptMapExplorerProps> = ({
   apartments,
@@ -611,7 +511,7 @@ export const EgyptMapExplorer: React.FC<EgyptMapExplorerProps> = ({
     setCameraTarget({ lat, lng, zoom, nonce: Date.now() });
   }, []);
 
-  const handleCameraChanged = useCallback((ev: MapCameraChangedEvent) => {
+  const handleCameraChanged = useCallback((ev: { detail: { zoom: number; bounds?: any } }) => {
     const nextZoom = Math.round(ev.detail.zoom * 10) / 10;
     setMapZoom((prev) => (Math.abs(prev - nextZoom) >= 0.2 ? nextZoom : prev));
     if (ev.detail.bounds) {

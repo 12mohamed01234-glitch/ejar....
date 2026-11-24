@@ -267,9 +267,12 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
   const [titleDeedFile, setTitleDeedFile] = useState<File | null>(null);
   const [utilityBillFile, setUtilityBillFile] = useState<File | null>(null);
 
-  // Step 3: Exclusive Mandate & Digital Signature
+  // Step 3: Exclusive Mandate, Commission Payment & Digital Signature
   const [digitalSignatureName, setDigitalSignatureName] = useState('');
   const [exclusivityAccepted, setExclusivityAccepted] = useState(false);
+  const [commissionPaymentMethod, setCommissionPaymentMethod] = useState<'instapay' | 'vodafone_cash' | 'bank_card'>('instapay');
+  const [commissionPaymentRef, setCommissionPaymentRef] = useState('');
+  const [commissionPaidConfirmed, setCommissionPaidConfirmed] = useState(false);
 
   const handleCategoryChange = (nextCat: ListingCategory) => {
     setCategory(nextCat);
@@ -536,6 +539,16 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
       return;
     }
 
+    if (oneTimeCommissionSample > 0 && (!commissionPaidConfirmed || commissionPaymentRef.trim().length < 4)) {
+      setErrorMsg(
+        t(
+          'يرجى استكمال بيانات دفع العمولة وتأكيد السداد في الخطوة الأخيرة قبل نشر الوحدة.',
+          'Please complete the commission payment reference and confirm payment before publishing.'
+        )
+      );
+      return;
+    }
+
     setSubmitting(true);
     const apartmentId = `apt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -605,6 +618,10 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
         verificationStatus,
         availabilityStatus: 'available',
         commissionRatePct: effectiveCommissionRatePct,
+        commissionPaid: oneTimeCommissionSample <= 0 || commissionPaidConfirmed,
+        commissionPaymentMethod,
+        commissionPaymentRef: commissionPaymentRef.trim().slice(0, 60),
+        commissionAmountEgp: oneTimeCommissionSample,
         mandateAccepted: true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -731,11 +748,11 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
           </p>
         </div>
 
-        <div className="grid grid-cols-3 gap-2.5">
+        <div className="grid grid-cols-3 gap-2">
           {[
             { num: 1, label: t('١. المواصفات والصور', '1. Specs & Photos') },
             { num: 2, label: t('٢. إثبات الملكية', '2. Title & ID') },
-            { num: 3, label: t('٣. التفويض والعمولة', '3. Mandate & Fee') },
+            { num: 3, label: t('٣. دفع العمولة والنشر', '3. Commission & Publish') },
           ].map((s) => (
             <div
               key={s.num}
@@ -1353,39 +1370,37 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                 </div>
               </div>
 
-              <div className="h-56 rounded-xl overflow-hidden border border-slate-200">
-                <LeafletLocationPicker
-                  lat={lat}
-                  lng={lng}
-                  onLocationChange={(newLat, newLng) => {
-                    setLat(newLat);
-                    setLng(newLng);
-                  }}
-                  cameraTarget={mapPanTarget}
-                />
-              </div>
+              <LeafletLocationPicker
+                lat={lat}
+                lng={lng}
+                onLocationChange={(newLat, newLng) => {
+                  setLat(newLat);
+                  setLng(newLng);
+                }}
+                cameraTarget={mapPanTarget}
+              />
             </div>
 
-          {/* 5. Photos Upload Section (1 to 6 Photos from Device) */}
-          <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4">
+          {/* 5. Photos Upload Section (1 to 6 Photos from Device Only) */}
+          <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
                   <Upload className="w-4 h-4 text-blue-700 shrink-0" />
                   <h3 className="text-sm font-bold text-slate-900">
-                    {t('صور الوحدة من جهازك (من ١ إلى ٦ صور كحد أقصى)', 'Property Photos from Device (1 to 6 max)')}
+                    {t('صور الوحدة من جهازك (من ١ إلى ٦ صور)', 'Property Photos from Device (1 to 6)')}
                   </h3>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {t(
-                    'ارفع صوراً حقيقية واضحة لوحدتك. يمكنك تعيين أي صورة كصورة رئيسية (غلاف) أو حذفها قبل الحفظ.',
-                    'Upload clear photos of your unit. Set any photo as primary cover or delete before saving.'
+                    'ارفع صوراً حقيقية واضحة لوحدتك من جهازك. يمكنك تحديد صورة الغلاف أو حذف أي صورة قبل الحفظ.',
+                    'Upload clear photos from your device. Set a cover photo or delete any photo before saving.'
                   )}
                 </p>
               </div>
 
               <span className="font-mono text-xs font-bold px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-slate-700">
-                {customImages.length} / 6 {t('صور مرفوعة', 'photos')}
+                {customImages.length} / 6 {t('صور', 'photos')}
               </span>
             </div>
 
@@ -1408,7 +1423,6 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                         className="w-full h-full object-cover"
                       />
 
-                      {/* Cover Badge or Set-Cover button */}
                       {img.isCover ? (
                         <div className="absolute top-1.5 start-1.5 bg-blue-700 text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
                           <Star className="w-3 h-3 fill-current text-amber-300" />
@@ -1424,12 +1438,11 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                         </button>
                       )}
 
-                      {/* Remove Button */}
                       <button
                         type="button"
                         onClick={() => handleRemoveCustomImage(img.id)}
                         title={t('حذف الصورة', 'Delete photo')}
-                        className="absolute top-1.5 end-1.5 bg-rose-600 hover:bg-rose-700 text-white p-1 rounded-md shadow-xs opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-1.5 end-1.5 bg-rose-600 hover:bg-rose-700 text-white p-1.5 rounded-md shadow-xs opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -1438,21 +1451,20 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                 </div>
               )}
 
-              {/* Upload Action Button / Dropzone */}
               {customImages.length < 6 && (
-                <label className="border-2 border-dashed border-blue-200 hover:border-blue-500 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-center gap-3 cursor-pointer bg-white hover:bg-blue-50/40 transition-colors">
+                <label className="border-2 border-dashed border-blue-200 hover:border-blue-500 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-center gap-3 cursor-pointer bg-white hover:bg-blue-50/40 transition-colors min-h-[88px]">
                   <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
                     <Upload className="w-5 h-5" />
                   </div>
                   <div className="text-center sm:text-start">
-                    <span className="text-xs font-bold text-slate-800 block">
+                    <span className="text-xs sm:text-sm font-bold text-slate-800 block">
                       {isUploadingCustomImage
-                        ? t('جاري رفع الصور إلى السحابة بأمان...', 'Uploading photos to cloud...')
-                        : t('اختر صوراً من جهازك (JPEG / PNG / WebP)', 'Select photos from your device (JPEG / PNG / WebP)')}
+                        ? t('جاري رفع الصور بأمان...', 'Uploading photos...')
+                        : t('اختر صوراً من جهازك أو الموبايل (JPEG / PNG)', 'Choose photos from your device (JPEG / PNG)')}
                     </span>
                     <span className="text-[11px] text-slate-500 block mt-0.5">
                       {t(
-                        `يمكنك اختيار حتى ${6 - customImages.length} صور إضافية مباشرة دفعة واحدة`,
+                        `يمكنك اختيار حتى ${6 - customImages.length} صور إضافية دفعة واحدة`,
                         `Select up to ${6 - customImages.length} more photos at once`
                       )}
                     </span>
@@ -1472,47 +1484,6 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                 <div className="text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
                   <span>{customImageError}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Optional Collapsed Preset Stock Templates */}
-            <div className="pt-2 border-t border-slate-200/80">
-              <button
-                type="button"
-                onClick={() => setShowPresetTemplates(!showPresetTemplates)}
-                className="text-xs text-blue-700 hover:text-blue-800 font-semibold inline-flex items-center gap-1.5"
-              >
-                <span>
-                  {showPresetTemplates
-                    ? t('إخفاء النماذج الافتراضية الجاهزة ▲', 'Hide default presets ▲')
-                    : t('أو اختر من النماذج المعمارية الافتراضية البديلة ▼', 'Or pick an architectural preset template ▼')}
-                </span>
-              </button>
-
-              {showPresetTemplates && (
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 mt-3 pt-2">
-                  {IMAGE_KEYS.map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => {
-                        setImageKey(k);
-                        setCustomImageUrl('');
-                      }}
-                      className={`relative aspect-[16/10] rounded-xl overflow-hidden border-2 transition-all ${
-                        imageKey === k && customImages.length === 0 && !customImageUrl
-                          ? 'border-blue-700 ring-2 ring-blue-600/30'
-                          : 'border-slate-200 opacity-80 hover:opacity-100'
-                      }`}
-                    >
-                      <ApartmentImage
-                        imageKey={k}
-                        alt={APARTMENT_IMAGES[k].label}
-                        className="w-full h-full"
-                      />
-                    </button>
-                  ))}
                 </div>
               )}
             </div>
@@ -1737,6 +1708,91 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Commission Payment Gateway Step */}
+          <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-4 sm:p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {t('سداد عمولة المنصة لنشر الوحدة', 'Pay Platform Commission to Publish')}
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  {t(
+                    'اختر وسيلة الدفع المناسبة وسدّد العمولة المحددة من الإدارة لتفعيل إعلانك فوراً.',
+                    'Choose your payment method and settle the admin-configured commission to publish.'
+                  )}
+                </p>
+              </div>
+              <div className="bg-white border border-blue-200 rounded-xl px-3.5 py-2 text-end">
+                <span className="text-[10px] text-slate-500 block">
+                  {t('المبلغ المطلوب سداده', 'Amount Due')}
+                </span>
+                <span className="font-mono font-extrabold text-base text-blue-700">
+                  {formatNumber(oneTimeCommissionSample)} {t('ج.م', 'EGP')}
+                </span>
+              </div>
+            </div>
+
+            {oneTimeCommissionSample > 0 ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {[
+                    { id: 'instapay' as const, label: t('إنستا باي (InstaPay)', 'InstaPay') },
+                    { id: 'vodafone_cash' as const, label: t('محفظة إلكترونية (فودافون كاش)', 'Mobile Wallet') },
+                    { id: 'bank_card' as const, label: t('بطاقة بنكية (Visa / Mastercard)', 'Bank Card') },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setCommissionPaymentMethod(m.id)}
+                      className={`min-h-[44px] px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                        commissionPaymentMethod === m.id
+                          ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {commissionPaymentMethod === 'instapay'
+                        ? t('حساب التحويل / رقم العملية المرجعي (InstaPay)', 'InstaPay Address / Transfer Ref')
+                        : commissionPaymentMethod === 'vodafone_cash'
+                          ? t('رقم المحفظة المحول منها أو رقم العملية', 'Wallet Number / Transaction Ref')
+                          : t('آخر 4 أرقام من البطاقة أو رقم الموافقة', 'Card Last 4 Digits / Approval Ref')}
+                    </label>
+                    <input
+                      type="text"
+                      value={commissionPaymentRef}
+                      onChange={(e) => setCommissionPaymentRef(e.target.value)}
+                      placeholder={t('مثال: TXN-984512 أو 01012345678', 'e.g. TXN-984512')}
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 min-h-[44px] text-xs font-bold text-slate-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={commissionPaidConfirmed}
+                      onChange={(e) => setCommissionPaidConfirmed(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-700"
+                    />
+                    <span>
+                      {t('تم دفع مبلغ العمولة بالكامل وتأكيد التحويل', 'I confirm full commission payment')}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs font-semibold text-emerald-800">
+                {t('نسبة العمولة الحالية 0% — يمكنك النشر مجاناً بدون رسوم.', 'Commission is currently 0% — free publishing enabled.')}
+              </div>
+            )}
           </div>
 
           <div>

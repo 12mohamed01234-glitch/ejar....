@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { APIProvider } from '@vis.gl/react-google-maps';
 import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
 import {
   collection,
@@ -2435,16 +2434,10 @@ export function App() {
 
   return (
     <FirestoreErrorBoundary>
-      <APIProvider
-        apiKey={GOOGLE_MAPS_API_KEY}
-        language="ar"
-        region="EG"
-        libraries={['marker', 'places']}
+      <div
+        dir={isRtl ? 'rtl' : 'ltr'}
+        className="min-h-screen flex flex-col bg-slate-50 text-slate-900 pb-16 md:pb-0"
       >
-        <div
-          dir={isRtl ? 'rtl' : 'ltr'}
-          className="min-h-screen flex flex-col bg-slate-50 text-slate-900 pb-16 md:pb-0"
-        >
           {/* Sticky Top Navigation Bar (Strict 3-Zone Architectural Budget) */}
           <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200">
             <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -3350,7 +3343,6 @@ export function App() {
             onApproveDeposit={handleApproveDeposit}
           />
         </div>
-      </APIProvider>
     </FirestoreErrorBoundary>
   );
 }

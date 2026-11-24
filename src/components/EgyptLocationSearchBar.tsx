@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useMapsLibrary } from '@vis.gl/react-google-maps';
 import { Search, MapPin, Compass, X, Loader2, CornerDownLeft, CornerDownRight } from 'lucide-react';
 import {
   EGYPT_GOVERNORATES,
@@ -14,8 +13,16 @@ export interface SelectedMapDestination {
   lat: number;
   lng: number;
   zoom?: number;
-  viewport?: google.maps.LatLngBounds | null;
+  viewport?: unknown;
   governorateName?: string;
+}
+
+interface NominatimResult {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+  name?: string;
 }
 
 interface EgyptLocationSearchBarProps {
@@ -24,43 +31,21 @@ interface EgyptLocationSearchBarProps {
   onClearDestination: () => void;
 }
 
-function checkAndDispatchQuotaError(err: unknown) {
-  const msg = String(err);
-  if (
-    msg.includes('OVER_QUERY_LIMIT') ||
-    msg.includes('RESOURCE_EXHAUSTED') ||
-    msg.includes('QuotaExceededError') ||
-    msg.includes('429')
-  ) {
-    window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-  }
-}
-
 export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
   onSelectDestination,
   activeDestinationLabel,
   onClearDestination,
 }) => {
-  const placesLib = useMapsLibrary('places');
   const { lang, isRtl, t, govLabel } = useI18n();
 
   const [queryText, setQueryText] = useState<string>('');
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [isLoadingPlaces, setIsLoadingPlaces] = useState<boolean>(false);
-  const [isFetchingDetails, setIsFetchingDetails] = useState<boolean>(false);
-  const [placeSuggestions, setPlaceSuggestions] = useState<
-    google.maps.places.AutocompleteSuggestion[]
-  >([]);
+  const [placeSuggestions, setPlaceSuggestions] = useState<NominatimResult[]>([]);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
 
-  const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-  const resetSession = useCallback(() => {
-    sessionTokenRef.current = null;
-    setPlaceSuggestions([]);
-  }, []);
 
   useEffect(() => {
     if (activeDestinationLabel === null) {
@@ -94,43 +79,37 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
 
   useEffect(() => {
     const trimmed = queryText.trim();
-    if (!placesLib || trimmed.length < 2) {
+    if (trimmed.length < 2) {
       setPlaceSuggestions([]);
       setIsLoadingPlaces(false);
       return;
     }
 
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      const { AutocompleteSessionToken, AutocompleteSuggestion } = placesLib;
-
-      if (!sessionTokenRef.current) {
-        sessionTokenRef.current = new AutocompleteSessionToken();
-      }
-
-      const request: google.maps.places.AutocompleteRequest = {
-        input: trimmed,
-        sessionToken: sessionTokenRef.current,
-        includedRegionCodes: ['eg'],
-        language: lang,
-        region: 'EG',
-      };
-
       setIsLoadingPlaces(true);
-      AutocompleteSuggestion.fetchAutocompleteSuggestions(request)
-        .then((res) => {
-          setPlaceSuggestions(res?.suggestions ?? []);
+      const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=eg&limit=6&accept-language=${lang}&q=${encodeURIComponent(
+        trimmed
+      )}`;
+      fetch(url, { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data: NominatimResult[]) => {
+          setPlaceSuggestions(Array.isArray(data) ? data : []);
           setIsLoadingPlaces(false);
         })
         .catch((err) => {
-          console.error('Error fetching Egypt place suggestions:', err);
-          checkAndDispatchQuotaError(err);
-          setPlaceSuggestions([]);
-          setIsLoadingPlaces(false);
+          if (err?.name !== 'AbortError') {
+            setPlaceSuggestions([]);
+            setIsLoadingPlaces(false);
+          }
         });
-    }, 220);
+    }, 300);
 
-    return () => window.clearTimeout(timer);
-  }, [placesLib, queryText, lang]);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [queryText, lang]);
 
   const handleSelectGovernorate = useCallback(
     (gov: GovernorateOption) => {
@@ -138,7 +117,6 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
       setQueryText(label);
       setIsOpen(false);
       setHighlightedIndex(-1);
-      resetSession();
       onSelectDestination({
         label,
         sublabel: t('انتقال مباشر للمحافظة في خريطة إيجار', 'Direct jump on Ejar Egypt Map'),
@@ -148,57 +126,42 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
         governorateName: gov.name,
       });
     },
-    [onSelectDestination, resetSession, isRtl, govLabel, t]
+    [onSelectDestination, isRtl, govLabel, t]
   );
 
   const handleSelectPlaceSuggestion = useCallback(
-    async (suggestion: google.maps.places.AutocompleteSuggestion) => {
-      if (!placesLib || !suggestion.placePrediction) return;
+    (item: NominatimResult) => {
+      const lat = parseFloat(item.lat);
+      const lng = parseFloat(item.lon);
+      if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
-      const labelText = suggestion.placePrediction.text?.text || '';
-      setIsFetchingDetails(true);
-      try {
-        const place = suggestion.placePrediction.toPlace();
-        await place.fetchFields({
-          fields: ['displayName', 'formattedAddress', 'location', 'viewport'],
-        });
+      const parts = item.display_name.split('،').length > 1
+        ? item.display_name.split('،')
+        : item.display_name.split(',');
+      const mainText = (item.name || parts[0] || item.display_name).trim();
+      const subText = parts.slice(1).join('، ').trim();
 
-        const loc = place.location;
-        if (loc) {
-          const lat = loc.lat();
-          const lng = loc.lng();
-          const finalLabel = place.displayName || labelText;
+      const fullAddress = item.display_name.toLowerCase();
+      const matchedGov = EGYPT_GOVERNORATES.find(
+        (g) =>
+          fullAddress.includes(g.name.toLowerCase()) ||
+          fullAddress.includes(govLabel(g.name).toLowerCase())
+      );
 
-          const fullAddress = `${finalLabel} ${place.formattedAddress || ''}`.toLowerCase();
-          const matchedGov = EGYPT_GOVERNORATES.find(
-            (g) =>
-              fullAddress.includes(g.name.toLowerCase()) ||
-              fullAddress.includes(govLabel(g.name).toLowerCase())
-          );
+      setQueryText(mainText);
+      setIsOpen(false);
+      setHighlightedIndex(-1);
 
-          setQueryText(finalLabel);
-          setIsOpen(false);
-          setHighlightedIndex(-1);
-
-          onSelectDestination({
-            label: finalLabel,
-            sublabel: place.formattedAddress || undefined,
-            lat,
-            lng,
-            zoom: 14,
-            viewport: place.viewport ?? null,
-            governorateName: matchedGov?.name,
-          });
-        }
-        resetSession();
-      } catch (err) {
-        console.error('Error fetching selected place coordinates:', err);
-        checkAndDispatchQuotaError(err);
-      } finally {
-        setIsFetchingDetails(false);
-      }
+      onSelectDestination({
+        label: mainText,
+        sublabel: subText || item.display_name,
+        lat,
+        lng,
+        zoom: 14,
+        governorateName: matchedGov?.name,
+      });
     },
-    [placesLib, onSelectDestination, resetSession, govLabel]
+    [onSelectDestination, govLabel]
   );
 
   const totalNavigableCount = matchedGovernorates.length + placeSuggestions.length;
@@ -232,9 +195,9 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
         highlightedIndex < totalNavigableCount
       ) {
         const placeIdx = highlightedIndex - matchedGovernorates.length;
-        void handleSelectPlaceSuggestion(placeSuggestions[placeIdx]);
+        handleSelectPlaceSuggestion(placeSuggestions[placeIdx]);
       } else if (placeSuggestions.length > 0) {
-        void handleSelectPlaceSuggestion(placeSuggestions[0]);
+        handleSelectPlaceSuggestion(placeSuggestions[0]);
       } else if (matchedGovernorates.length > 0) {
         handleSelectGovernorate(matchedGovernorates[0]);
       }
@@ -246,7 +209,6 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
     setPlaceSuggestions([]);
     setHighlightedIndex(-1);
     setIsOpen(false);
-    resetSession();
     onClearDestination();
   };
 
@@ -260,7 +222,7 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
       >
         <div className="flex items-center gap-2">
           <div className="ps-2 text-blue-700 shrink-0">
-            {isLoadingPlaces || isFetchingDetails ? (
+            {isLoadingPlaces ? (
               <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
             ) : (
               <Search className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -311,12 +273,12 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
             type="button"
             onClick={() => {
               if (placeSuggestions.length > 0) {
-                void handleSelectPlaceSuggestion(placeSuggestions[0]);
+                handleSelectPlaceSuggestion(placeSuggestions[0]);
               } else if (matchedGovernorates.length > 0) {
                 handleSelectGovernorate(matchedGovernorates[0]);
               }
             }}
-            disabled={!queryText.trim() || isFetchingDetails}
+            disabled={!queryText.trim()}
             className="min-h-[42px] px-3.5 sm:px-4 py-2 rounded-xl bg-blue-700 hover:bg-blue-800 disabled:bg-slate-100 disabled:text-slate-400 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <span className="sm:hidden">{t('انتقل', 'Go')}</span>
@@ -384,22 +346,19 @@ export const EgyptLocationSearchBar: React.FC<EgyptLocationSearchBarProps> = ({
                 </div>
               ) : (
                 <ul role="listbox">
-                  {placeSuggestions.map((suggestion, idx) => {
+                  {placeSuggestions.map((item, idx) => {
                     const globalIdx = matchedGovernorates.length + idx;
                     const isActive = highlightedIndex === globalIdx;
-                    const mainText =
-                      suggestion.placePrediction?.mainText?.text ||
-                      suggestion.placePrediction?.text?.text ||
-                      '';
-                    const secondaryText =
-                      suggestion.placePrediction?.secondaryText?.text || '';
+                    const parts = item.display_name.split(',');
+                    const mainText = (item.name || parts[0] || item.display_name).trim();
+                    const secondaryText = parts.slice(1).join('، ').trim();
 
                     return (
-                      <li key={suggestion.placePrediction?.placeId || idx}>
+                      <li key={item.place_id || idx}>
                         <button
                           type="button"
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => void handleSelectPlaceSuggestion(suggestion)}
+                          onClick={() => handleSelectPlaceSuggestion(item)}
                           className={`w-full min-h-[44px] px-3 py-2.5 rounded-xl text-start flex items-start gap-2.5 text-xs transition-colors cursor-pointer ${
                             isActive
                               ? 'bg-blue-50 text-slate-900'

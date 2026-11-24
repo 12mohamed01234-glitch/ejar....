@@ -1802,8 +1802,9 @@ export const PlatformAdminConsole: React.FC<PlatformAdminConsoleProps> = ({
   };
 
   const handleApplyBaseCommissionToAllCategories = () => {
+    const rawVal = commissionText.trim() !== '' && !Number.isNaN(Number(commissionText)) ? Number(commissionText) : undefined;
     const baseStr = String(
-      clampCommissionInt(Number(commissionText) || undefined, VALIDATION_LIMITS.DEFAULT_COMMISSION_PCT)
+      clampCommissionInt(rawVal, VALIDATION_LIMITS.DEFAULT_COMMISSION_PCT)
     );
     setCommissionText(baseStr);
     setFamilyCommissionText(baseStr);
@@ -1815,30 +1816,17 @@ export const PlatformAdminConsole: React.FC<PlatformAdminConsoleProps> = ({
 
   const handleSaveAllRatesAndSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedCommission = clampCommissionInt(
-      Number(commissionText) || undefined,
-      VALIDATION_LIMITS.DEFAULT_COMMISSION_PCT
-    );
-    const parsedFamily = clampCommissionInt(
-      Number(familyCommissionText) || undefined,
-      parsedCommission
-    );
-    const parsedWholeHouse = clampCommissionInt(
-      Number(wholeHouseCommissionText) || undefined,
-      parsedCommission
-    );
-    const parsedHotel = clampCommissionInt(
-      Number(hotelCommissionText) || undefined,
-      parsedCommission
-    );
-    const parsedFactory = clampCommissionInt(
-      Number(factoryCommissionText) || undefined,
-      parsedCommission
-    );
-    const parsedStudent = clampCommissionInt(
-      Number(studentCommissionText) || undefined,
-      parsedCommission
-    );
+    const parsePct = (txt: string, fallback: number) =>
+      clampCommissionInt(
+        txt.trim() !== '' && !Number.isNaN(Number(txt)) ? Number(txt) : undefined,
+        fallback
+      );
+    const parsedCommission = parsePct(commissionText, VALIDATION_LIMITS.DEFAULT_COMMISSION_PCT);
+    const parsedFamily = parsePct(familyCommissionText, parsedCommission);
+    const parsedWholeHouse = parsePct(wholeHouseCommissionText, parsedCommission);
+    const parsedHotel = parsePct(hotelCommissionText, parsedCommission);
+    const parsedFactory = parsePct(factoryCommissionText, parsedCommission);
+    const parsedStudent = parsePct(studentCommissionText, parsedCommission);
 
     const parsedEscrowFee = Number(escrowFeeText) || 0;
     const parsedDiscount = Number(discountText) || 0;
