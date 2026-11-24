@@ -259,6 +259,13 @@ export function App() {
   const [recoveryConfirmPassword, setRecoveryConfirmPassword] = useState('');
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [recoverySaving, setRecoverySaving] = useState(false);
+
+  const [pendingGoogleProfile, setPendingGoogleProfile] = useState<UserAccountData | null>(null);
+  const [pendingName, setPendingName] = useState('');
+  const [pendingPhone, setPendingPhone] = useState('');
+  const [pendingRole, setPendingRole] = useState<'tenant' | 'landlord'>('tenant');
+  const [pendingProfileError, setPendingProfileError] = useState<string | null>(null);
+  const [pendingProfileSaving, setPendingProfileSaving] = useState(false);
   const { lang, isRtl, toggleLang, t, formatNumber } = useI18n();
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -360,16 +367,25 @@ export function App() {
           let localUser: UserAccountData | null = null;
           try {
             const raw = localStorage.getItem('ejar_custom_user');
-            if (raw) localUser = JSON.parse(raw) as UserAccountData;
+            if (raw) {
+              const parsed = JSON.parse(raw) as UserAccountData;
+              if (
+                parsed.uid === u.id ||
+                (u.email && parsed.email?.toLowerCase() === u.email.toLowerCase())
+              ) {
+                localUser = parsed;
+              }
+            }
           } catch {}
 
           let dbProfile: UserAccountData | null = null;
           try {
-            dbProfile = await getSupabaseProfile(u.id);
+            dbProfile =
+              (await getSupabaseProfile(u.id)) ||
+              (u.email ? await getSupabaseProfileByEmail(u.email) : null);
           } catch {}
 
           const savedLocalPhoto =
-            localStorage.getItem('ejar_custom_photo') ||
             (u.email ? localStorage.getItem(`ejar_photo_${u.email.toLowerCase()}`) : null) ||
             localStorage.getItem(`ejar_photo_${u.id}`);
 
@@ -396,10 +412,19 @@ export function App() {
             createdAtMs: dbProfile?.createdAtMs || localUser?.createdAtMs || Date.now(),
           };
 
-          setUserAccountData(restored);
-          try {
-            localStorage.setItem('ejar_custom_user', JSON.stringify(restored));
-          } catch {}
+          if (!dbProfile && !restored.phone) {
+            setPendingGoogleProfile(restored);
+            setPendingName(restored.displayName || '');
+            setPendingPhone('');
+            setPendingRole('tenant');
+            setPendingProfileError(null);
+          } else {
+            setPendingGoogleProfile(null);
+            setUserAccountData(restored);
+            try {
+              localStorage.setItem('ejar_custom_user', JSON.stringify(restored));
+            } catch {}
+          }
         }
       } catch (err) {
         console.warn('[SyncUserSession Error]:', err);
@@ -424,11 +449,18 @@ export function App() {
         let localUser: UserAccountData | null = null;
         try {
           const raw = localStorage.getItem('ejar_custom_user');
-          if (raw) localUser = JSON.parse(raw) as UserAccountData;
+          if (raw) {
+            const parsed = JSON.parse(raw) as UserAccountData;
+            if (
+              parsed.uid === u.id ||
+              (u.email && parsed.email?.toLowerCase() === u.email.toLowerCase())
+            ) {
+              localUser = parsed;
+            }
+          }
         } catch {}
 
         const savedLocalPhoto =
-          localStorage.getItem('ejar_custom_photo') ||
           (u.email ? localStorage.getItem(`ejar_photo_${u.email.toLowerCase()}`) : null) ||
           localStorage.getItem(`ejar_photo_${u.id}`);
 
@@ -455,10 +487,19 @@ export function App() {
           createdAtMs: dbProfile?.createdAtMs || localUser?.createdAtMs || Date.now(),
         };
 
-        setUserAccountData(restored);
-        try {
-          localStorage.setItem('ejar_custom_user', JSON.stringify(restored));
-        } catch {}
+        if (!dbProfile && !restored.phone) {
+          setPendingGoogleProfile(restored);
+          setPendingName(restored.displayName || '');
+          setPendingPhone('');
+          setPendingRole('tenant');
+          setPendingProfileError(null);
+        } else {
+          setPendingGoogleProfile(null);
+          setUserAccountData(restored);
+          try {
+            localStorage.setItem('ejar_custom_user', JSON.stringify(restored));
+          } catch {}
+        }
       } else if (event === 'SIGNED_OUT') {
         setUserAccountData(null);
         try {
@@ -1982,8 +2023,15 @@ export function App() {
 
   const handleSignOut = async () => {
     try {
-      await signOut(auth);
+      await Promise.allSettled([
+        signOut(auth),
+        supabase.auth.signOut(),
+      ]);
     } finally {
+      try {
+        localStorage.removeItem('ejar_custom_user');
+        localStorage.removeItem('ejar_custom_photo');
+      } catch {}
       setCurrentUser(null);
       setUserAccountData(null);
       setSessionTokenReady(false);
@@ -3408,6 +3456,160 @@ export function App() {
                   >
                     {recoverySaving ? t('جاري الحفظ...', 'Saving...') : t('حفظ كلمة المرور الجديدة', 'Save New Password')}
                   </button>
+                </form>
+              </div>
+            </div>
+          )}
+          {/* 7. New Google Account Registration Modal (When email has no saved profile yet) */}
+          {pendingGoogleProfile && (
+            <div
+              className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-xl">
+                <div className="space-y-1 border-b border-slate-100 pb-3">
+                  <div className="text-xs font-bold text-blue-700">
+                    {t('حساب جديد — غير مسجل مسبقاً', 'New Account — Not Registered Yet')}
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    {t('استكمال بيانات التسجيل', 'Complete Your Registration')}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {t(
+                      `البريد (${pendingGoogleProfile.email}) غير مسجل مسبقاً. أدخل بياناتك لإنشاء حسابك وحفظها.`,
+                      `Email (${pendingGoogleProfile.email}) is not registered yet. Enter your details to create your account.`
+                    )}
+                  </p>
+                </div>
+
+                {pendingProfileError && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs font-semibold text-rose-700">
+                    {pendingProfileError}
+                  </div>
+                )}
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setPendingProfileError(null);
+                    const cleanName = pendingName.trim();
+                    const cleanPhone = pendingPhone
+                      .trim()
+                      .replace(/[\s\-\(\)\.]/g, '')
+                      .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+                    if (cleanName.length < 3) {
+                      setPendingProfileError(t('يرجى إدخال الاسم بالكامل', 'Please enter your full name'));
+                      return;
+                    }
+                    if (!/^01[0125][0-9]{8}$/.test(cleanPhone)) {
+                      setPendingProfileError(t('يرجى إدخال رقم موبايل مصري صحيح مكون من 11 رقماً (يبدأ بـ 010/011/012/015)', 'Enter a valid 11-digit Egyptian phone number'));
+                      return;
+                    }
+                    setPendingProfileSaving(true);
+                    try {
+                      const completed: UserAccountData = {
+                        ...pendingGoogleProfile,
+                        displayName: cleanName,
+                        phone: cleanPhone,
+                        role: pendingRole,
+                      };
+                      await upsertSupabaseProfile(completed);
+                      setUserAccountData(completed);
+                      try {
+                        localStorage.setItem('ejar_custom_user', JSON.stringify(completed));
+                      } catch {}
+                      setPendingGoogleProfile(null);
+                      showToast(t(`تم إنشاء حسابك وحفظ بياناتك بنجاح ✓ مرحباً ${cleanName}`, `Account created and saved ✓`));
+                    } catch {
+                      setPendingProfileError(t('تعذر حفظ البيانات حالياً، حاول مرة أخرى', 'Could not save profile'));
+                    } finally {
+                      setPendingProfileSaving(false);
+                    }
+                  }}
+                  className="space-y-3.5"
+                >
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      {t('نوع الحساب', 'Account Type')}
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPendingRole('tenant')}
+                        className={`py-2.5 px-3 rounded-xl border text-xs font-bold ${
+                          pendingRole === 'tenant'
+                            ? 'bg-blue-700 text-white border-blue-700'
+                            : 'bg-white text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {t('مستأجر', 'Tenant')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingRole('landlord')}
+                        className={`py-2.5 px-3 rounded-xl border text-xs font-bold ${
+                          pendingRole === 'landlord'
+                            ? 'bg-blue-700 text-white border-blue-700'
+                            : 'bg-white text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {t('مالك عقار', 'Landlord')}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      {t('الاسم بالكامل', 'Full Name')}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={pendingName}
+                      onChange={(e) => setPendingName(e.target.value)}
+                      placeholder={t('أدخل اسمك بالكامل', 'Enter your full name')}
+                      className="w-full h-11 px-3.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:border-blue-700"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      {t('رقم الموبايل المصري (11 رقماً)', 'Egyptian Mobile (11 digits)')}
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      maxLength={11}
+                      dir="ltr"
+                      value={pendingPhone}
+                      onChange={(e) => setPendingPhone(e.target.value)}
+                      placeholder="01012345678"
+                      className="w-full h-11 px-3.5 text-sm font-mono rounded-xl border border-slate-300 focus:outline-none focus:border-blue-700"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingGoogleProfile(null);
+                        void handleSignOut();
+                      }}
+                      className="px-4 h-11 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50"
+                    >
+                      {t('إلغاء', 'Cancel')}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={pendingProfileSaving}
+                      className="flex-1 h-11 bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors"
+                    >
+                      {pendingProfileSaving
+                        ? t('جاري الحفظ...', 'Saving...')
+                        : t('حفظ البيانات وإنشاء الحساب', 'Save & Create Account')}
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>
