@@ -284,16 +284,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     try {
       const ext = file.name.split('.').pop() || 'jpg';
       const cleanUid = userData.uid.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const filePath = `avatars/${cleanUid}_${Date.now()}.${ext}`;
+      const filePath = `${cleanUid}_${Date.now()}.${ext}`;
       const { publicUrl, isFallback } = await uploadSupabaseFile('avatars', filePath, file);
       
       setProfilePhoto(publicUrl);
       const updated: UserAccountData = { ...userData, photoUrl: publicUrl };
       
-      // Update app state & localStorage immediately
+      // Update app state & localStorage immediately across all fallback keys
       onUpdateUserData?.(updated);
       try {
         localStorage.setItem('ejar_custom_user', JSON.stringify(updated));
+        localStorage.setItem('ejar_custom_photo', publicUrl);
+        if (userData.uid) localStorage.setItem(`ejar_photo_${userData.uid}`, publicUrl);
+        if (userData.email) localStorage.setItem(`ejar_photo_${userData.email.toLowerCase()}`, publicUrl);
       } catch {}
 
       // Persist to Supabase Database (profiles table)

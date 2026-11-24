@@ -116,7 +116,8 @@ export async function compressImageBlob(
 
 /**
  * Universal Supabase Storage Upload Helper
- * Automatically compresses images, uploads to the given bucket, and returns its public CDN URL.
+ * Automatically compresses images, supports videos without corruption,
+ * uploads to the given bucket, and returns its public CDN URL.
  * Falls back gracefully to the lightweight compressed Data URL if the bucket is not created or inaccessible.
  */
 export async function uploadSupabaseFile(
@@ -125,13 +126,32 @@ export async function uploadSupabaseFile(
   file: File | Blob
 ): Promise<{ publicUrl: string; error: string | null; isFallback: boolean }> {
   try {
-    const cleanPath = filePath.replace(/^\/+/, '');
-    const { blob: compressedBlob, dataUrl: compressedDataUrl } = await compressImageBlob(file);
-    const contentType = 'image/jpeg';
+    let cleanPath = filePath.replace(/^\/+/, '');
+    // Strip leading bucket name if caller passed bucket in the path
+    if (cleanPath.startsWith(bucket + '/')) {
+      cleanPath = cleanPath.slice(bucket.length + 1);
+    }
+
+    const fileName = file instanceof File ? file.name : '';
+    const isVideo = (file.type && file.type.startsWith('video/')) ||
+      /\.(mp4|webm|ogg|mov|mkv|avi|m4v)$/i.test(fileName);
+
+    let uploadBlob: Blob = file;
+    let dataUrl = '';
+    let contentType = file.type || (isVideo ? 'video/mp4' : 'image/jpeg');
+
+    if (!isVideo) {
+      const compressed = await compressImageBlob(file);
+      uploadBlob = compressed.blob;
+      dataUrl = compressed.dataUrl;
+      contentType = 'image/jpeg';
+    } else {
+      dataUrl = await blobToDataUrl(file);
+    }
 
     const { error } = await supabase.storage
       .from(bucket)
-      .upload(cleanPath, compressedBlob, {
+      .upload(cleanPath, uploadBlob, {
         upsert: true,
         contentType,
       });
@@ -139,7 +159,7 @@ export async function uploadSupabaseFile(
     if (error) {
       console.warn(`[Supabase Storage] Upload notice for bucket "${bucket}":`, error.message);
       return {
-        publicUrl: compressedDataUrl,
+        publicUrl: dataUrl,
         error: error.message,
         isFallback: true,
       };

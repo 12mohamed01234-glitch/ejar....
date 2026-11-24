@@ -333,7 +333,14 @@ export function App() {
   const [userAccountData, setUserAccountData] = useState<UserAccountData | null>(() => {
     try {
       const stored = localStorage.getItem('ejar_custom_user');
-      if (stored) return JSON.parse(stored) as UserAccountData;
+      const savedPhoto = localStorage.getItem('ejar_custom_photo');
+      if (stored) {
+        const parsed = JSON.parse(stored) as UserAccountData;
+        if (savedPhoto && (!parsed.photoUrl || parsed.photoUrl.includes('dicebear.com/7.x/initials'))) {
+          parsed.photoUrl = savedPhoto;
+        }
+        return parsed;
+      }
     } catch {}
     return null;
   });
@@ -356,12 +363,17 @@ export function App() {
             dbProfile = await getSupabaseProfile(u.id);
           } catch {}
 
+          const savedLocalPhoto =
+            localStorage.getItem('ejar_custom_photo') ||
+            (u.email ? localStorage.getItem(`ejar_photo_${u.email.toLowerCase()}`) : null) ||
+            localStorage.getItem(`ejar_photo_${u.id}`);
+
           const customPhoto =
             (dbProfile?.photoUrl && !dbProfile.photoUrl.includes('dicebear.com/7.x/initials'))
               ? dbProfile.photoUrl
               : (localUser?.photoUrl && !localUser.photoUrl.includes('dicebear.com/7.x/initials'))
               ? localUser.photoUrl
-              : u.user_metadata?.avatar_url || u.user_metadata?.photo_url;
+              : savedLocalPhoto || u.user_metadata?.avatar_url || u.user_metadata?.photo_url;
 
           const defaultPhoto = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
             dbProfile?.displayName || localUser?.displayName || u.user_metadata?.full_name || u.email || 'user'
@@ -405,12 +417,17 @@ export function App() {
           if (raw) localUser = JSON.parse(raw) as UserAccountData;
         } catch {}
 
+        const savedLocalPhoto =
+          localStorage.getItem('ejar_custom_photo') ||
+          (u.email ? localStorage.getItem(`ejar_photo_${u.email.toLowerCase()}`) : null) ||
+          localStorage.getItem(`ejar_photo_${u.id}`);
+
         const customPhoto =
           (dbProfile?.photoUrl && !dbProfile.photoUrl.includes('dicebear.com/7.x/initials'))
             ? dbProfile.photoUrl
             : (localUser?.photoUrl && !localUser.photoUrl.includes('dicebear.com/7.x/initials'))
             ? localUser.photoUrl
-            : u.user_metadata?.avatar_url || u.user_metadata?.photo_url;
+            : savedLocalPhoto || u.user_metadata?.avatar_url || u.user_metadata?.photo_url;
 
         const defaultPhoto = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
           dbProfile?.displayName || localUser?.displayName || u.user_metadata?.full_name || u.email || 'user'

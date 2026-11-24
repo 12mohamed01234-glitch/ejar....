@@ -162,21 +162,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   // Real Legal & Operational Dialog Modals State
   const [activeInfoModal, setActiveInfoModal] = useState<
-    'about' | 'terms' | 'privacy' | 'support' | 'forgot' | 'activation' | null
+    'about' | 'terms' | 'privacy' | 'support' | null
   >(null);
-
-  // Password Recovery Flow State
-  const [resetStep, setResetStep] = useState<'input' | 'otp' | 'success'>('input');
-  const [resetIdentifier, setResetIdentifier] = useState('');
-  const [resetOtp, setResetOtp] = useState('');
-  const [resetNewPass, setResetNewPass] = useState('');
-  const [resetError, setResetError] = useState<string | null>(null);
-  const [resetCodeGenerated, setResetCodeGenerated] = useState('');
-
-  // Activation Troubleshooting State
-  const [troublePhone, setTroublePhone] = useState('');
-  const [activationChannel, setActivationChannel] = useState<'sms' | 'whatsapp' | 'email'>('sms');
-  const [activationNotice, setActivationNotice] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -583,49 +570,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
-
-  function generateNewOtpCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  }
-
-  // Password Recovery Handlers
-  const handleStartPasswordReset = (e: React.FormEvent) => {
-    e.preventDefault();
-    setResetError(null);
-    if (!resetIdentifier.trim()) {
-      setResetError('يرجى إدخال رقم الهاتف أو البريد الإلكتروني المسجل.');
-      return;
-    }
-
-    const code = generateNewOtpCode();
-    setResetCodeGenerated(code);
-    setResetStep('otp');
-  };
-
-  const handleConfirmPasswordReset = (e: React.FormEvent) => {
-    e.preventDefault();
-    setResetError(null);
-
-    if (resetOtp.trim() !== resetCodeGenerated) {
-      setResetError('كود التأكيد غير صحيح! يرجى كتابة الرمز الـ 6 أرقام الموضح أعلاه.');
-      return;
-    }
-
-    if (!resetNewPass || resetNewPass.length < 6) {
-      setResetError('كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل.');
-      return;
-    }
-
-    setResetStep('success');
-    setTimeout(() => {
-      setActiveInfoModal(null);
-      setResetStep('input');
-      setResetIdentifier('');
-      setResetOtp('');
-      setResetNewPass('');
-      setInfoMsg('تمت استعادة وتغيير كلمة المرور بنجاح ✓ يمكنك الآن تسجيل الدخول بها.');
-    }, 1500);
   };
 
   return (
@@ -1173,31 +1117,67 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <li>
                     <button
                       type="button"
-                      onClick={() => {
-                        setResetIdentifier(email || phone || '');
-                        setResetStep('input');
-                        setResetError(null);
-                        setActiveInfoModal('forgot');
+                      onClick={async () => {
+                        const trimmed = email.trim();
+                        if (!trimmed || !trimmed.includes('@')) {
+                          setErrorMsg(t('يرجى إدخال بريدك الإلكتروني في الحقل أعلاه أولاً لإرسال رابط استعادة كلمة المرور', 'Please enter your email above first to receive password reset link'));
+                          return;
+                        }
+                        setLoading(true);
+                        setErrorMsg(null);
+                        try {
+                          const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
+                            redirectTo: window.location.origin,
+                          });
+                          if (error) {
+                            setErrorMsg(error.message);
+                          } else {
+                            setInfoMsg(t(`تم إرسال رابط استعادة كلمة المرور الرسمية إلى بريدك (${trimmed}) ✓ يرجى فحص صندوق الوارد.`, `Password reset link sent to (${trimmed}) ✓ Please check your inbox.`));
+                          }
+                        } catch {
+                          setErrorMsg(t('تعذر إرسال رابط الاستعادة حالياً، يرجى المحاولة لاحقاً', 'Could not send reset link, please try again'));
+                        } finally {
+                          setLoading(false);
+                        }
                       }}
                       className="text-blue-700 hover:text-blue-900 hover:underline flex items-center gap-1.5 font-medium"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-700 inline-block" />
-                      <span>{t('فقدت كلمة المرور', 'Forgot password')}</span>
+                      <span>{t('فقدت كلمة المرور (إرسال رابط استعادة)', 'Forgot password (send reset link)')}</span>
                     </button>
                   </li>
 
                   <li>
                     <button
                       type="button"
-                      onClick={() => {
-                        setTroublePhone(phone || '01012345678');
-                        setActivationNotice(null);
-                        setActiveInfoModal('activation');
+                      onClick={async () => {
+                        const trimmed = email.trim();
+                        if (!trimmed || !trimmed.includes('@')) {
+                          setErrorMsg(t('يرجى كتابة بريدك الإلكتروني في الحقل أعلاه أولاً لإعادة إرسال رابط التفعيل', 'Please enter your email above to resend activation link'));
+                          return;
+                        }
+                        setLoading(true);
+                        setErrorMsg(null);
+                        try {
+                          const { error } = await supabase.auth.resend({
+                            type: 'signup',
+                            email: trimmed,
+                          });
+                          if (error) {
+                            setErrorMsg(error.message);
+                          } else {
+                            setInfoMsg(t(`تم إعادة إرسال رابط تفعيل الحساب إلى بريدك (${trimmed}) ✓ يرجى مراجعة صندوق البريد.`, `Activation link re-sent to (${trimmed}) ✓ Please check your inbox.`));
+                          }
+                        } catch {
+                          setErrorMsg(t('تعذر إعادة إرسال الرابط، يرجى المحاولة لاحقاً', 'Could not resend link, please try again'));
+                        } finally {
+                          setLoading(false);
+                        }
                       }}
                       className="text-blue-700 hover:text-blue-900 hover:underline flex items-center gap-1.5 font-medium"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-700 inline-block" />
-                      <span>{t('لم يصلني رمز التفعيل', "Didn't receive activation code")}</span>
+                      <span>{t('لم يصلني رابط التفعيل (إعادة إرسال)', "Didn't receive activation link (Resend)")}</span>
                     </button>
                   </li>
                 </ul>
@@ -1498,209 +1478,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <span className="text-xs text-slate-600 leading-relaxed block">
                   يمكنك رفض الاستلام فوراً من خلال زر «إلغاء واسترداد» في تفاصيل الحجز، وسيقوم فريق الدعم بمراجعة محضر المعاينة وإعادة كامل مستحقاتك دون أي خصم.
                 </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 5. فقدت كلمة المرور (Real Working Password Recovery Flow) */}
-      {activeInfoModal === 'forgot' && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5 animate-fade-in">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700">
-                  <KeyRound className="w-5 h-5" />
-                </div>
-                <h3 className="text-base font-bold text-slate-900">استعادة كلمة المرور</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveInfoModal(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {resetError && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                <span>{resetError}</span>
-              </div>
-            )}
-
-            {resetStep === 'input' && (
-              <form onSubmit={handleStartPasswordReset} className="space-y-4 text-xs text-slate-600">
-                <p className="leading-relaxed">
-                  أدخل رقم هاتفك المحمول المسجل أو بريدك الإلكتروني لإرسال كود تحقق مكون من 6 أرقام وتعيين كلمة مرور جديدة:
-                </p>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    رقم الهاتف أو البريد الإلكتروني
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={resetIdentifier}
-                    onChange={(e) => setResetIdentifier(e.target.value)}
-                    placeholder="01012345678 أو email@example.com"
-                    className="w-full h-11 px-4 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full h-11 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>إرسال كود التحقق (6 أرقام)</span>
-                </button>
-              </form>
-            )}
-
-            {resetStep === 'otp' && (
-              <form onSubmit={handleConfirmPasswordReset} className="space-y-4 text-xs text-slate-600">
-                {/* Simulation banner for the reset code */}
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 leading-tight">
-                  <div className="font-bold flex items-center gap-1.5">
-                    <span>📩 كود استعادة كلمة المرور المعتمد:</span>
-                  </div>
-                  <div className="mt-1">
-                    رمز الأمان هو:{' '}
-                    <span className="font-mono font-black text-sm text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
-                      {resetCodeGenerated}
-                    </span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    كود التحقق (6 أرقام)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={6}
-                    value={resetOtp}
-                    onChange={(e) => setResetOtp(e.target.value)}
-                    placeholder="أدخل الـ 6 أرقام الموضحة أعلاه"
-                    className="w-full h-11 px-4 text-xs font-mono text-center tracking-widest font-black rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    كلمة المرور الجديدة
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={resetNewPass}
-                    onChange={(e) => setResetNewPass(e.target.value)}
-                    placeholder="•••••••• (6 أحرف على الأقل)"
-                    className="w-full h-11 px-4 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full h-11 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>تأكيد وحفظ كلمة المرور الجديدة</span>
-                </button>
-              </form>
-            )}
-
-            {resetStep === 'success' && (
-              <div className="py-6 text-center space-y-2 text-emerald-700">
-                <CheckCircle2 className="w-12 h-12 mx-auto animate-bounce text-emerald-600" />
-                <h4 className="font-bold text-base text-slate-900">تم تغيير كلمة المرور بنجاح!</h4>
-                <p className="text-xs text-slate-600">جاري التوجيه لتسجيل الدخول بكلمة المرور الجديدة...</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 6. لم يصلني رمز التفعيل (Activation Code Troubleshooting) */}
-      {activeInfoModal === 'activation' && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-5 animate-fade-in">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-700">
-                  <Smartphone className="w-5 h-5" />
-                </div>
-                <h3 className="text-base font-bold text-slate-900">حل مشكلات رمز التفعيل (SMS)</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveInfoModal(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {activationNotice && (
-              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>{activationNotice}</span>
-              </div>
-            )}
-
-            <div className="space-y-4 text-xs text-slate-600 leading-relaxed">
-              <p>
-                إذا تأخر وصول كود التأكيد، يرجى التأكد أولاً من صحة رقم الهاتف المكتوب:
-              </p>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  رقم الهاتف المسجل (11 رقماً):
-                </label>
-                <input
-                  type="tel"
-                  maxLength={11}
-                  value={troublePhone}
-                  onChange={(e) => setTroublePhone(e.target.value)}
-                  placeholder="01012345678"
-                  className="w-full h-11 px-4 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                />
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <span className="font-bold text-slate-800 block text-xs">اختر قناة الإرسال البديلة:</span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActivationNotice(`تم إرسال كود الـ 6 أرقام الجديد عبر رسالة SMS إلى ${troublePhone} ✓`);
-                    }}
-                    className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 text-slate-800 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <Smartphone className="w-3.5 h-3.5 text-blue-700" />
-                    <span>إعادة إرسال SMS</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActivationNotice(`تم إرسال كود الـ 6 أرقام عبر واتساب إلى الرقم ${troublePhone} بنجاح ✓`);
-                    }}
-                    className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 text-slate-800 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>إرسال عبر WhatsApp</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-[11px] text-slate-500 space-y-1">
-                <span className="font-bold text-slate-700 block">💡 نصائح سريعة:</span>
-                <span>• تأكد من وجود تغطية جيدة لشبكة المحمول في منطقتك.</span>
-                <span className="block">• تأكد من عدم تفعيل خاصية حظر الرسائل الدعائية (DND) لدى مشغل الخدمة.</span>
               </div>
             </div>
           </div>

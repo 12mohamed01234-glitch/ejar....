@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Heart,
@@ -30,6 +30,8 @@ import {
   Sparkles,
   Key,
   BadgeCheck,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import {
   ApartmentRecord,
@@ -108,6 +110,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
   } = useI18n();
 
   const [mediaMode, setMediaMode] = useState<'photo' | '360'>('photo');
+  const [activePhotoIdx, setActivePhotoIdx] = useState<number>(0);
   const [calcRentalUnit, setCalcRentalUnit] = useState<RentalUnitType>('month');
   const [calcDuration, setCalcDuration] = useState<number>(3);
   const [calcBedsCount, setCalcBedsCount] = useState<number>(1);
@@ -115,6 +118,22 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
   const [includeMaintenance, setIncludeMaintenance] = useState<boolean>(true);
   const [customMaintenancePerCycle, setCustomMaintenancePerCycle] = useState<string>('');
   const [calcCurrency, setCalcCurrency] = useState<SupportedCurrency>('EGP');
+
+  const allPhotos: string[] = useMemo(() => {
+    if (!apartment) return [];
+    const list: string[] = [];
+    if (apartment.imageUrls && Array.isArray(apartment.imageUrls)) {
+      for (const u of apartment.imageUrls) {
+        if (typeof u === 'string' && u.trim() && !list.includes(u.trim())) {
+          list.push(u.trim());
+        }
+      }
+    }
+    if (apartment.imageUrl && !list.includes(apartment.imageUrl)) {
+      list.unshift(apartment.imageUrl);
+    }
+    return list;
+  }, [apartment]);
 
   const getDefaultMaintenancePerCycle = (
     apt: ApartmentRecord,
@@ -142,6 +161,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
 
   useEffect(() => {
     setMediaMode('photo');
+    setActivePhotoIdx(0);
     if (!apartment) return;
     const nextUnit: RentalUnitType =
       apartment.category === 'hotel_room' && apartment.dailyRateEgp > 0
@@ -417,22 +437,101 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
               externalTourUrl={apartment.virtualTourUrl}
             />
           ) : (
-            <div className="relative rounded-2xl overflow-hidden border border-slate-200 aspect-[16/9] bg-slate-100">
-              <ApartmentImage
-                imageKey={apartment.imageKey}
-                imageUrl={apartment.imageUrl}
-                alt={apartment.title}
-                className="w-full h-full"
-              />
-              {panoramaSrc && (
-                <button
-                  type="button"
-                  onClick={() => setMediaMode('360')}
-                  className="absolute bottom-4 end-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950/80 hover:bg-slate-950 text-white text-xs font-semibold backdrop-blur-md transition-colors whitespace-nowrap shrink-0"
-                >
-                  <Compass className="w-4 h-4 text-blue-400" />
-                  <span>{t('بدء الجولة الافتراضية 360°', 'Launch 360° Virtual Tour')}</span>
-                </button>
+            <div className="space-y-3">
+              <div className="relative rounded-2xl overflow-hidden border border-slate-200 aspect-[16/9] bg-slate-900 group">
+                {allPhotos.length > 0 ? (
+                  <img
+                    src={allPhotos[activePhotoIdx] || allPhotos[0]}
+                    alt={apartment.title}
+                    className="w-full h-full object-cover transition-all duration-300"
+                  />
+                ) : (
+                  <ApartmentImage
+                    imageKey={apartment.imageKey}
+                    imageUrl={apartment.imageUrl}
+                    alt={apartment.title}
+                    className="w-full h-full"
+                  />
+                )}
+
+                {allPhotos.length > 1 && (
+                  <>
+                    {/* Navigation Arrows */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePhotoIdx((prev) =>
+                          prev === 0 ? allPhotos.length - 1 : prev - 1
+                        )
+                      }
+                      aria-label="Previous photo"
+                      className="absolute start-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-slate-950/70 hover:bg-slate-950 text-white backdrop-blur-md transition-all shadow-md opacity-80 group-hover:opacity-100"
+                    >
+                      {lang === 'ar' ? (
+                        <ChevronRight className="w-5 h-5" />
+                      ) : (
+                        <ChevronLeft className="w-5 h-5" />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePhotoIdx((prev) =>
+                          prev === allPhotos.length - 1 ? 0 : prev + 1
+                        )
+                      }
+                      aria-label="Next photo"
+                      className="absolute end-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-slate-950/70 hover:bg-slate-950 text-white backdrop-blur-md transition-all shadow-md opacity-80 group-hover:opacity-100"
+                    >
+                      {lang === 'ar' ? (
+                        <ChevronLeft className="w-5 h-5" />
+                      ) : (
+                        <ChevronRight className="w-5 h-5" />
+                      )}
+                    </button>
+
+                    {/* Photo Counter Pill */}
+                    <div className="absolute top-3 end-3 bg-slate-950/75 text-white text-xs font-mono font-bold px-2.5 py-1 rounded-full backdrop-blur-md shadow-xs">
+                      {activePhotoIdx + 1} / {allPhotos.length}
+                    </div>
+                  </>
+                )}
+
+                {panoramaSrc && (
+                  <button
+                    type="button"
+                    onClick={() => setMediaMode('360')}
+                    className="absolute bottom-4 end-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950/80 hover:bg-slate-950 text-white text-xs font-semibold backdrop-blur-md transition-colors whitespace-nowrap shrink-0 shadow-md"
+                  >
+                    <Compass className="w-4 h-4 text-blue-400" />
+                    <span>{t('بدء الجولة الافتراضية 360°', 'Launch 360° Virtual Tour')}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Thumbnail Strip */}
+              {allPhotos.length > 1 && (
+                <div className="flex items-center gap-2 overflow-x-auto pb-1.5 pt-0.5">
+                  {allPhotos.map((photoUrl, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setActivePhotoIdx(idx)}
+                      className={`relative w-20 sm:w-24 aspect-[16/10] rounded-xl overflow-hidden shrink-0 border-2 transition-all ${
+                        activePhotoIdx === idx
+                          ? 'border-blue-600 ring-2 ring-blue-500/30 scale-102 shadow-xs'
+                          : 'border-slate-200 opacity-60 hover:opacity-100'
+                      }`}
+                    >
+                      <img
+                        src={photoUrl}
+                        alt={`Thumbnail ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
           )}

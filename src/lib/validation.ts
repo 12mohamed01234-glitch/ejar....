@@ -692,6 +692,7 @@ export interface ApartmentRecord {
   furnishing: FurnishingType;
   imageKey: ImageKey;
   imageUrl?: string;
+  imageUrls?: string[];
   hasVirtualTour?: boolean;
   panorama360Key?: Panorama360PresetKey;
   panorama360DataUrl?: string;
@@ -1229,6 +1230,11 @@ export function normalizeApartmentRecord(
         : typeof raw.image_url === 'string'
         ? raw.image_url
         : undefined,
+    imageUrls: Array.isArray(raw.imageUrls)
+      ? (raw.imageUrls as string[])
+      : Array.isArray(raw.images)
+      ? (raw.images as string[])
+      : undefined,
     hasVirtualTour: Boolean(raw.hasVirtualTour ?? false),
     panorama360Key: (raw.panorama360Key as Panorama360PresetKey) || 'none',
     panorama360DataUrl:

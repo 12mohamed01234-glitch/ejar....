@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
+import { LeafletLocationPicker } from './LeafletLocationPicker';
 import {
   Building2,
   ShieldCheck,
@@ -12,6 +12,10 @@ import {
   CheckCircle2,
   Lock,
   MapPin,
+  Trash2,
+  Star,
+  Plus,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   db,
@@ -68,17 +72,7 @@ const PRESET_360_KEYS = Object.keys(PANORAMA_360_PRESETS) as Array<
   Exclude<Panorama360PresetKey, 'none'>
 >;
 
-const WizardMapCameraController: React.FC<{
-  target: { lat: number; lng: number; zoom: number; nonce: number } | null;
-}> = ({ target }) => {
-  const map = useMap();
-  useEffect(() => {
-    if (!map || !target) return;
-    map.panTo({ lat: target.lat, lng: target.lng });
-    map.setZoom(target.zoom);
-  }, [map, target]);
-  return null;
-};
+// Map camera controller is now handled inside LeafletLocationPicker
 
 export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
   currentUser,
@@ -133,29 +127,82 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
   const [areaSqmText, setAreaSqmText] = useState<string>('150');
   const [furnishing, setFurnishing] = useState<FurnishingType>('furnished');
   const [imageKey, setImageKey] = useState<ImageKey>('zamalek_nile');
+  const [customImages, setCustomImages] = useState<Array<{ id: string; url: string; isCover: boolean }>>([]);
   const [customImageUrl, setCustomImageUrl] = useState<string>('');
   const [isUploadingCustomImage, setIsUploadingCustomImage] = useState<boolean>(false);
   const [customImageError, setCustomImageError] = useState<string | null>(null);
+  const [showPresetFallback, setShowPresetFallback] = useState<boolean>(false);
 
-  const handleCustomImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleMultipleImagesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const remaining = 6 - customImages.length;
+    if (remaining <= 0) {
+      setCustomImageError('الحد الأقصى للصور هو 6 صور فقط لكل وحدة.');
+      return;
+    }
+
+    const filesToUpload = files.slice(0, remaining);
     setIsUploadingCustomImage(true);
     setCustomImageError(null);
+
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
-      const filePath = `apartments/apt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-      const { publicUrl, error } = await uploadSupabaseFile('apartments', filePath, file);
-      setCustomImageUrl(publicUrl);
-      if (error) {
-        console.info('Supabase storage fallback used:', error);
+      const newItems: Array<{ id: string; url: string; isCover: boolean }> = [];
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const file = filesToUpload[i];
+        const ext = file.name.split('.').pop() || 'jpg';
+        const filePath = `apt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+        const { publicUrl } = await uploadSupabaseFile('apartments', filePath, file);
+        if (publicUrl) {
+          newItems.push({
+            id: `img_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 5)}`,
+            url: publicUrl,
+            isCover: customImages.length === 0 && i === 0,
+          });
+        }
+      }
+
+      setCustomImages((prev) => {
+        const merged = [...prev, ...newItems];
+        if (merged.length > 0 && !merged.some((m) => m.isCover)) {
+          merged[0].isCover = true;
+        }
+        return merged.slice(0, 6);
+      });
+      if (newItems.length > 0 && !customImageUrl) {
+        setCustomImageUrl(newItems[0].url);
       }
     } catch (err) {
-      setCustomImageError(err instanceof Error ? err.message : 'فشل رفع الصورة');
+      setCustomImageError(err instanceof Error ? err.message : 'فشل رفع الصور');
     } finally {
       setIsUploadingCustomImage(false);
+      if (e.target) e.target.value = '';
     }
   };
+
+  const handleSetCover = (id: string) => {
+    setCustomImages((prev) =>
+      prev.map((img) => ({
+        ...img,
+        isCover: img.id === id,
+      }))
+    );
+    const cover = customImages.find((img) => img.id === id);
+    if (cover) setCustomImageUrl(cover.url);
+  };
+
+  const handleRemoveCustomImage = (id: string) => {
+    setCustomImages((prev) => {
+      const filtered = prev.filter((img) => img.id !== id);
+      if (filtered.length > 0 && !filtered.some((img) => img.isCover)) {
+        filtered[0].isCover = true;
+      }
+      return filtered;
+    });
+  };
+
+  const [showPresetTemplates, setShowPresetTemplates] = useState<boolean>(false);
 
   // Whole-House Specific Specifications (منزل كامل)
   const [wholeHouseBillingMode, setWholeHouseBillingMode] =
@@ -552,8 +599,9 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
         areaSqm: Math.max(18, Math.min(100000, Math.round(areaSqm))),
         furnishing,
         imageKey,
-        imageUrl: customImageUrl || undefined,
-        hasVirtualTour: Boolean(hasVirtualTour || virtualTourUrl.trim() !== ''),
+        imageUrl: (customImages.find((img) => img.isCover)?.url || customImages[0]?.url || customImageUrl) || undefined,
+        imageUrls: customImages.length > 0 ? customImages.map((img) => img.url) : (customImageUrl ? [customImageUrl] : undefined),
+        hasVirtualTour: false,
         verificationStatus,
         availabilityStatus: 'available',
         commissionRatePct: effectiveCommissionRatePct,
@@ -664,34 +712,39 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Header & 3-Step Progress Bar */}
-      <div className="space-y-3">
-        <div className="text-xs font-semibold text-blue-700">
-          {t(
-            'بوابة تسجيل الملاك وتوثيق الملكية العقارية',
-            'Verified Landlord Onboarding & Legal Dossier'
-          )}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full mb-1.5">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{t('منصة إيجار الموثقة — طرح الوحدات', 'Verified Ejar Listing Portal')}</span>
+            </div>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              {t('اعرض وحدتك العقارية', 'List Your Property')}
+            </h1>
+          </div>
+          <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
+            {t(
+              'خطوات سهلة ومنظمة لعرض عقارك للمستأجرين الموثقين بالجنيه المصري وبحماية كاملة.',
+              'Simple and secure steps to list your property for verified tenants in EGP.'
+            )}
+          </p>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
-          {t(
-            'اعرض وحدتك (شقة · منزل كامل · فندق · مصنع · سكن طلاب) بالعملة والجولة 360°',
-            'List Your Unit (Apartment · Whole House · Hotel · Factory · Student) with 360° Tour'
-          )}
-        </h1>
 
-        <div className="grid grid-cols-3 gap-2 pt-2">
+        <div className="grid grid-cols-3 gap-2.5">
           {[
-            { num: 1, label: t('1. المواصفات والعملة وجولة 360°', '1. Specs, Currency & 360° Tour') },
-            { num: 2, label: t('2. مستندات الملكية والهوية', '2. Title Deed & National ID') },
-            { num: 3, label: t('3. عقد التفويض والعمولة الموحدة', '3. Mandate & One-Time Fee') },
+            { num: 1, label: t('١. المواصفات والصور', '1. Specs & Photos') },
+            { num: 2, label: t('٢. إثبات الملكية', '2. Title & ID') },
+            { num: 3, label: t('٣. التفويض والعمولة', '3. Mandate & Fee') },
           ].map((s) => (
             <div
               key={s.num}
-              className={`px-3 py-2.5 rounded-xl border text-xs font-bold transition-colors ${
+              className={`px-3 py-2.5 rounded-xl border text-xs font-bold text-center transition-all ${
                 step === s.num
-                  ? 'bg-blue-700 text-white border-blue-700'
+                  ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
                   : step > s.num
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-white text-slate-500 border-slate-200'
+                    : 'bg-slate-50 text-slate-500 border-slate-200'
               }`}
             >
               {s.label}
@@ -1222,264 +1275,246 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
             )}
           </div>
 
-          {/* 4. Interactive Map Pin Picker */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-800 inline-flex items-center gap-1.5">
-                <MapPin className="w-4 h-4 text-blue-700" />
-                <span>
-                  {t('تحديد موقع الوحدة على خريطة مصر (اضغط لتعديل الدبوس)', 'Click Map to Pin Exact Location')}
+            {/* 4. Interactive Map Pin Picker */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-slate-800 inline-flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-blue-700" />
+                  <span>
+                    {t('تحديد موقع الوحدة على خريطة مصر (اضغط أو اسحب الدبوس لتغيير الموقع)', 'Click or drag pin to set location')}
+                  </span>
                 </span>
-              </span>
-              <span className="font-mono tabular-nums text-slate-500">
-                {lat.toFixed(4)}, {lng.toFixed(4)}
-              </span>
-            </div>
-            <div className="h-56 rounded-xl overflow-hidden border border-slate-200">
-              <Map
-                mapId="DEMO_MAP_ID"
-                defaultCenter={{ lat: 30.0444, lng: 31.2357 }}
-                defaultZoom={12}
-                gestureHandling="greedy"
-                keyboardShortcuts={false}
-                internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                onClick={(ev) => {
-                  if (ev.detail.latLng) {
-                    setLat(ev.detail.latLng.lat);
-                    setLng(ev.detail.latLng.lng);
-                  }
-                }}
-                className="w-full h-full"
-              >
-                <WizardMapCameraController target={mapPanTarget} />
-                <AdvancedMarker position={{ lat, lng }} />
-              </Map>
-            </div>
-          </div>
-
-          {/* 5. Cover Image Selection */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-800">
-              {t('الصورة الرئيسية للوحدة', 'Primary Architectural Photo')}
-            </label>
-            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
-              {IMAGE_KEYS.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => {
-                    setImageKey(k);
-                    setCustomImageUrl('');
-                  }}
-                  className={`relative aspect-[16/10] rounded-xl overflow-hidden border-2 transition-all ${
-                    imageKey === k && !customImageUrl
-                      ? 'border-blue-700 ring-2 ring-blue-600/30'
-                      : 'border-slate-200 opacity-80 hover:opacity-100'
-                  }`}
-                >
-                  <ApartmentImage
-                    imageKey={k}
-                    alt={APARTMENT_IMAGES[k].label}
-                    className="w-full h-full"
-                  />
-                </button>
-              ))}
-            </div>
-
-            {/* Custom Photo Upload via Supabase Storage */}
-            <div className="pt-2">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-slate-700">
-                  {t('أو ارفع صورة خاصة لوحدتك (تخزين سحابي مباشر):', 'Or upload custom photo (Supabase Storage):')}
-                </span>
-                {customImageUrl && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setCustomImageUrl('')}
-                    className="text-[11px] text-rose-600 hover:underline font-semibold"
+                    onClick={() => {
+                      if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                          (pos) => {
+                            const newLat = Number(pos.coords.latitude.toFixed(5));
+                            const newLng = Number(pos.coords.longitude.toFixed(5));
+                            setLat(newLat);
+                            setLng(newLng);
+                            setMapPanTarget({ lat: newLat, lng: newLng, zoom: 15, nonce: Date.now() });
+                          },
+                          () => {
+                            setErrorMsg(t('تعذر تحديد موقعك الحالي. يرجى تفعيل إذن الموقع في متصفحك.', 'Could not get current location. Please enable GPS permissions.'));
+                          }
+                        );
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg border border-blue-200 text-[11px] transition-colors"
                   >
-                    {t('إلغاء واستخدام النماذج الجاهزة', 'Clear custom photo')}
+                    <span>📍 {t('موقعي الحالي', 'Current GPS')}</span>
                   </button>
-                )}
+                  <span className="font-mono tabular-nums text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                    {typeof lat === 'number' ? lat.toFixed(4) : lat}, {typeof lng === 'number' ? lng.toFixed(4) : lng}
+                  </span>
+                </div>
               </div>
 
-              {customImageUrl ? (
-                <div className="relative aspect-[16/9] max-w-sm rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm">
-                  <img src={customImageUrl} alt="Preview" className="w-full h-full object-cover" />
-                  <div className="absolute bottom-2 start-2 bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>{t('تم رفع وتثبيت الصورة المخصصة ✓', 'Custom photo loaded ✓')}</span>
-                  </div>
+              {/* Manual coordinate inputs in case the user wants to paste coords */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
+                    {t('خط العرض (Latitude)', 'Latitude')}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={lat}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        setLat(val);
+                        setMapPanTarget({ lat: val, lng, zoom: 13, nonce: Date.now() });
+                      }
+                    }}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono text-xs"
+                  />
                 </div>
-              ) : (
-                <label className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-3.5 flex items-center justify-center gap-2 cursor-pointer bg-slate-50/80 hover:bg-blue-50/50 transition-colors">
-                  <Upload className="w-4 h-4 text-blue-700" />
-                  <span className="text-xs font-bold text-slate-700">
-                    {isUploadingCustomImage
-                      ? t('جاري الرفع إلى السحابة...', 'Uploading to cloud...')
-                      : t('اختر صورة من جهازك (JPEG / PNG)', 'Select image from device (JPEG / PNG)')}
-                  </span>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
+                    {t('خط الطول (Longitude)', 'Longitude')}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={lng}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        setLng(val);
+                        setMapPanTarget({ lat, lng: val, zoom: 13, nonce: Date.now() });
+                      }
+                    }}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="h-56 rounded-xl overflow-hidden border border-slate-200">
+                <LeafletLocationPicker
+                  lat={lat}
+                  lng={lng}
+                  onLocationChange={(newLat, newLng) => {
+                    setLat(newLat);
+                    setLng(newLng);
+                  }}
+                  cameraTarget={mapPanTarget}
+                />
+              </div>
+            </div>
+
+          {/* 5. Photos Upload Section (1 to 6 Photos from Device) */}
+          <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-blue-700 shrink-0" />
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {t('صور الوحدة من جهازك (من ١ إلى ٦ صور كحد أقصى)', 'Property Photos from Device (1 to 6 max)')}
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {t(
+                    'ارفع صوراً حقيقية واضحة لوحدتك. يمكنك تعيين أي صورة كصورة رئيسية (غلاف) أو حذفها قبل الحفظ.',
+                    'Upload clear photos of your unit. Set any photo as primary cover or delete before saving.'
+                  )}
+                </p>
+              </div>
+
+              <span className="font-mono text-xs font-bold px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-slate-700">
+                {customImages.length} / 6 {t('صور مرفوعة', 'photos')}
+              </span>
+            </div>
+
+            {/* Custom Photos Grid & Dropzone */}
+            <div className="space-y-3">
+              {customImages.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                  {customImages.map((img) => (
+                    <div
+                      key={img.id}
+                      className={`relative aspect-[4/3] rounded-xl overflow-hidden border-2 bg-slate-100 group transition-all ${
+                        img.isCover
+                          ? 'border-blue-700 ring-2 ring-blue-600/30 shadow-xs'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <img
+                        src={img.url}
+                        alt="Unit"
+                        className="w-full h-full object-cover"
+                      />
+
+                      {/* Cover Badge or Set-Cover button */}
+                      {img.isCover ? (
+                        <div className="absolute top-1.5 start-1.5 bg-blue-700 text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
+                          <Star className="w-3 h-3 fill-current text-amber-300" />
+                          <span>{t('الغلاف', 'Cover')}</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSetCover(img.id)}
+                          className="absolute top-1.5 start-1.5 bg-slate-900/80 hover:bg-slate-900 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-md opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          {t('تعيين غلاف', 'Set Cover')}
+                        </button>
+                      )}
+
+                      {/* Remove Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCustomImage(img.id)}
+                        title={t('حذف الصورة', 'Delete photo')}
+                        className="absolute top-1.5 end-1.5 bg-rose-600 hover:bg-rose-700 text-white p-1 rounded-md shadow-xs opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Upload Action Button / Dropzone */}
+              {customImages.length < 6 && (
+                <label className="border-2 border-dashed border-blue-200 hover:border-blue-500 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-center gap-3 cursor-pointer bg-white hover:bg-blue-50/40 transition-colors">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <div className="text-center sm:text-start">
+                    <span className="text-xs font-bold text-slate-800 block">
+                      {isUploadingCustomImage
+                        ? t('جاري رفع الصور إلى السحابة بأمان...', 'Uploading photos to cloud...')
+                        : t('اختر صوراً من جهازك (JPEG / PNG / WebP)', 'Select photos from your device (JPEG / PNG / WebP)')}
+                    </span>
+                    <span className="text-[11px] text-slate-500 block mt-0.5">
+                      {t(
+                        `يمكنك اختيار حتى ${6 - customImages.length} صور إضافية مباشرة دفعة واحدة`,
+                        `Select up to ${6 - customImages.length} more photos at once`
+                      )}
+                    </span>
+                  </div>
                   <input
                     type="file"
                     accept="image/*"
+                    multiple
                     disabled={isUploadingCustomImage}
-                    onChange={handleCustomImageUpload}
+                    onChange={handleMultipleImagesUpload}
                     className="hidden"
                   />
                 </label>
               )}
 
               {customImageError && (
-                <p className="text-xs text-rose-600 mt-1">{customImageError}</p>
+                <div className="text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>{customImageError}</span>
+                </div>
               )}
             </div>
-          </div>
 
-          {/* 6. 360° Virtual Tour & Panorama Upload Section */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                  <Compass className="w-4 h-4 text-blue-700" />
-                  <span>
-                    {t(
-                      'جولة افتراضية تفاعلية وصور بانوراما 360 درجة (اختياري)',
-                      '360° Virtual Tour & Equirectangular Panorama (Optional)'
-                    )}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500">
-                  {t(
-                    'ارفع صورة بانوراما 360° لوحدتك أو اختر نموذجاً تفاعلياً أو أضف رابط جولة خارجية لتمكين المستأجرين من معاينة الوحدة بالكامل.',
-                    'Upload a 360° panoramic image, choose a preset scene, or attach an external virtual tour link.'
-                  )}
-                </p>
-              </div>
-
-              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={hasVirtualTour}
-                  onChange={(e) => setHasVirtualTour(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
-                />
-                <span className="text-xs font-bold text-slate-800">
-                  {t('تفعيل عارض 360° التفاعلي', 'Enable Interactive 360° Viewer')}
+            {/* Optional Collapsed Preset Stock Templates */}
+            <div className="pt-2 border-t border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => setShowPresetTemplates(!showPresetTemplates)}
+                className="text-xs text-blue-700 hover:text-blue-800 font-semibold inline-flex items-center gap-1.5"
+              >
+                <span>
+                  {showPresetTemplates
+                    ? t('إخفاء النماذج الافتراضية الجاهزة ▲', 'Hide default presets ▲')
+                    : t('أو اختر من النماذج المعمارية الافتراضية البديلة ▼', 'Or pick an architectural preset template ▼')}
                 </span>
-              </label>
-            </div>
+              </button>
 
-            {hasVirtualTour && (
-              <div className="space-y-4 pt-2 border-t border-slate-200">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPanoramaSourceMode('upload')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                      panoramaSourceMode === 'upload'
-                        ? 'bg-slate-900 text-white border-slate-900'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    {t('رفع صورة 360° من جهازي', 'Upload Custom 360° Photo')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPanoramaSourceMode('preset')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                      panoramaSourceMode === 'preset'
-                        ? 'bg-slate-900 text-white border-slate-900'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    {t('اختيار مشهد بانوراما 360° جاهز', 'Choose Curated 360° Scene')}
-                  </button>
-                </div>
-
-                {panoramaSourceMode === 'upload' ? (
-                  <div className="bg-white border border-dashed border-slate-300 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-                    <div className="text-xs text-slate-600">
-                      <div className="font-semibold text-slate-900">
-                        {panoramaFileName
-                          ? `${t('تم تجهيز:', 'Loaded:')} ${panoramaFileName}`
-                          : t(
-                              'اختر صورة بانورامية بزاوية 360° (JPEG / PNG)',
-                              'Select an equirectangular 360° panorama photo (JPEG / PNG)'
-                            )}
-                      </div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">
-                        {t(
-                          'يتم ضغط الصورة تلقائياً في المتصفح لحفظها بأمان وسرعة عالية.',
-                          'Automatically optimized client-side for instant interactive 360° panning.'
-                        )}
-                      </div>
-                    </div>
-                    <label className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold rounded-lg cursor-pointer whitespace-nowrap shrink-0">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>
-                        {compressingPanorama
-                          ? t('جاري المعالجة...', 'Processing...')
-                          : t('رفع صورة 360°', 'Upload 360° Image')}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePanoramaUpload}
-                        className="hidden"
+              {showPresetTemplates && (
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 mt-3 pt-2">
+                  {IMAGE_KEYS.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => {
+                        setImageKey(k);
+                        setCustomImageUrl('');
+                      }}
+                      className={`relative aspect-[16/10] rounded-xl overflow-hidden border-2 transition-all ${
+                        imageKey === k && customImages.length === 0 && !customImageUrl
+                          ? 'border-blue-700 ring-2 ring-blue-600/30'
+                          : 'border-slate-200 opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      <ApartmentImage
+                        imageKey={k}
+                        alt={APARTMENT_IMAGES[k].label}
+                        className="w-full h-full"
                       />
-                    </label>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {PRESET_360_KEYS.map((pk) => (
-                      <button
-                        key={pk}
-                        type="button"
-                        onClick={() => setPanorama360Key(pk)}
-                        className={`p-3 rounded-xl border text-start text-xs font-semibold transition-colors ${
-                          panorama360Key === pk
-                            ? 'bg-blue-50 border-blue-600 text-blue-900'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        {lang === 'ar'
-                          ? PANORAMA_360_PRESETS[pk].labelAr
-                          : PANORAMA_360_PRESETS[pk].labelEn}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {previewPanoramaSrc && (
-                  <div className="space-y-1.5">
-                    <div className="text-xs font-semibold text-slate-700">
-                      {t('معاينة حية للجولة الافتراضية 360°:', 'Live 360° Virtual Tour Preview:')}
-                    </div>
-                    <VirtualTour360Viewer
-                      imageSrc={previewPanoramaSrc}
-                      unitTitle={title || t('معاينة الوحدة 360°', '360° Unit Preview')}
-                      externalTourUrl={virtualTourUrl || undefined}
-                      compact
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                {t(
-                  'رابط جولة افتراضية خارجية (Matterport / Kuula — اختياري)',
-                  'External Virtual Tour Link (https://... Optional)'
-                )}
-              </label>
-              <input
-                type="url"
-                placeholder="https://my.matterport.com/show/?m=..."
-                value={virtualTourUrl}
-                onChange={(e) => setVirtualTourUrl(e.target.value)}
-                className="w-full px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono"
-              />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
