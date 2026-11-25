@@ -102,7 +102,14 @@ export type NotificationStatusType =
   | 'cancelled'
   | 'pending_approval'
   | 'price_drop'
-  | 'chat_unlocked';
+  | 'chat_unlocked'
+  | 'booking_confirmed'
+  | 'payment_received'
+  | 'wallet_deposit'
+  | 'ai_warning'
+  | 'account_ban'
+  | 'listing_published'
+  | 'system_alert';
 export type NotificationRecipientRole = 'tenant' | 'landlord';
 export type NotificationRelatedEntityType =
   | 'rental_request'
@@ -110,7 +117,10 @@ export type NotificationRelatedEntityType =
   | 'apartment'
   | 'kyc'
   | 'favorite'
-  | 'chat_thread';
+  | 'chat_thread'
+  | 'wallet'
+  | 'security'
+  | 'system';
 
 export type SupportedCurrency = 'EGP' | 'USD' | 'SAR' | 'EUR' | 'AED';
 
@@ -353,6 +363,13 @@ export const NOTIFICATION_STATUS_LABELS: Record<NotificationStatusType, string> 
   cancelled: 'تم إلغاء الطلب',
   price_drop: 'انخفاض السعر',
   chat_unlocked: 'فتح الشات والهاتف',
+  booking_confirmed: 'حجز وسداد مؤكد',
+  payment_received: 'سداد رسمي',
+  wallet_deposit: 'إيداع بالمحفظة',
+  ai_warning: 'تنبيه أمني',
+  account_ban: 'قرار حظر',
+  listing_published: 'نشر وحدة',
+  system_alert: 'إشعار المنصة',
 };
 
 export interface GovernorateOption {
@@ -1156,7 +1173,16 @@ export function normalizeNotificationRecord(
 ): NotificationRecord {
   const createdAtObj = raw.createdAt as { toMillis?: () => number } | undefined;
   const updatedAtObj = raw.updatedAt as { toMillis?: () => number } | undefined;
-  const createdMs = createdAtObj?.toMillis?.() ?? Date.now();
+  const createdMs =
+    createdAtObj?.toMillis?.() ??
+    (typeof raw.createdAtMs === 'number' && !Number.isNaN(raw.createdAtMs)
+      ? raw.createdAtMs
+      : Date.now());
+  const updatedMs =
+    updatedAtObj?.toMillis?.() ??
+    (typeof raw.updatedAtMs === 'number' && !Number.isNaN(raw.updatedAtMs)
+      ? raw.updatedAtMs
+      : createdMs);
   return {
     id,
     recipientId: String(raw.recipientId || ''),
@@ -1175,7 +1201,7 @@ export function normalizeNotificationRecord(
     message: String(raw.message || ''),
     isRead: Boolean(raw.isRead ?? false),
     createdAtMs: createdMs,
-    updatedAtMs: updatedAtObj?.toMillis?.() ?? createdMs,
+    updatedAtMs: updatedMs,
   };
 }
 

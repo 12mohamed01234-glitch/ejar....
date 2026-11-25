@@ -172,6 +172,13 @@ const NOTIF_STATUS_MAP: Record<NotificationStatusType, { ar: string; en: string 
   cancelled: { ar: 'تم إلغاء الطلب', en: 'Cancelled' },
   price_drop: { ar: 'انخفاض السعر', en: 'Price Drop' },
   chat_unlocked: { ar: 'فتح الشات والهاتف', en: 'Chat & Phone Unlocked' },
+  booking_confirmed: { ar: 'حجز وسداد مؤكد', en: 'Confirmed Booking' },
+  payment_received: { ar: 'سداد رسمي', en: 'Payment Received' },
+  wallet_deposit: { ar: 'إيداع بالمحفظة', en: 'Wallet Deposit' },
+  ai_warning: { ar: 'تنبيه أمني', en: 'Safety Warning' },
+  account_ban: { ar: 'قرار حظر', en: 'Account Restriction' },
+  listing_published: { ar: 'نشر وحدة', en: 'Listing Published' },
+  system_alert: { ar: 'إشعار المنصة', en: 'System Alert' },
 };
 
 const CURRENCY_META: Record<string, { ar: string; en: string; symAr: string; symEn: string }> = {

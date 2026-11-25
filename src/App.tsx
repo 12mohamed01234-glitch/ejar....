@@ -32,6 +32,7 @@ import {
   ShieldCheck,
   Sparkles,
   BadgeCheck,
+  Bell,
 } from 'lucide-react';
 import {
   auth,
@@ -61,6 +62,8 @@ import {
   DEFAULT_PLATFORM_SETTINGS,
   FavoriteRecord,
   NotificationRecord,
+  NotificationStatusType,
+  NotificationRelatedEntityType,
   PaymentMethodType,
   PlatformSettingsRecord,
   RentalRequestRecord,
@@ -106,6 +109,7 @@ import { UserProfileModal } from './components/UserProfileModal';
 import { TenantVerificationModal, TenantVerificationData } from './components/TenantVerificationModal';
 import { KycVerificationPage, KycVerificationData } from './components/KycVerificationPage';
 import { PublicProfilePage, PublicProfileUser } from './components/PublicProfilePage';
+import { NotificationsInboxModal } from './components/NotificationsInboxModal';
 import {
   supabase,
   fetchSupabaseApartments,
@@ -582,6 +586,25 @@ export function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isTenantVerificationModalOpen, setIsTenantVerificationModalOpen] = useState(false);
+  const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
+
+  // Hydrate user notifications from offline/local storage when user changes
+  useEffect(() => {
+    const activeUid = effectiveUser?.uid;
+    if (!activeUid) return;
+    try {
+      const key = `ejar_notifications_${activeUid}`;
+      const stored = JSON.parse(localStorage.getItem(key) || '[]') as NotificationRecord[];
+      if (Array.isArray(stored) && stored.length > 0) {
+        setMyNotifications((prev) => {
+          const map = new Map<string, NotificationRecord>();
+          stored.forEach((item) => map.set(item.id, item));
+          prev.forEach((item) => map.set(item.id, item));
+          return Array.from(map.values()).sort((a, b) => b.createdAtMs - a.createdAtMs);
+        });
+      }
+    } catch {}
+  }, [effectiveUser?.uid]);
 
   const [myTenantVerificationData, setMyTenantVerificationData] = useState<TenantVerificationData | null>(null);
 
@@ -640,6 +663,134 @@ export function App() {
     }, 5000);
   }, []);
 
+  const pushInAppNotification = useCallback(
+    async (payload: {
+      recipientId: string;
+      actorId?: string;
+      actorDisplayName?: string;
+      recipientRole?: 'tenant' | 'landlord';
+      statusType: NotificationStatusType;
+      relatedEntityType?: NotificationRelatedEntityType;
+      relatedEntityId?: string;
+      apartmentId?: string;
+      apartmentTitle?: string;
+      governorate?: string;
+      amountEgp?: number;
+      title: string;
+      message: string;
+      isRead?: boolean;
+    }) => {
+      const notifId = buildNotificationId('ntf');
+      const now = Date.now();
+      const newNotif: NotificationRecord = {
+        id: notifId,
+        recipientId: payload.recipientId,
+        actorId: payload.actorId || 'system',
+        actorDisplayName: payload.actorDisplayName || 'منصة إيجار مصر',
+        recipientRole: payload.recipientRole || 'tenant',
+        statusType: payload.statusType,
+        relatedEntityType: payload.relatedEntityType || 'system',
+        relatedEntityId: payload.relatedEntityId || '',
+        apartmentId: payload.apartmentId || '',
+        apartmentTitle: payload.apartmentTitle || '',
+        governorate: payload.governorate || 'القاهرة',
+        amountEgp: payload.amountEgp || 0,
+        title: payload.title,
+        message: payload.message,
+        isRead: payload.isRead ?? false,
+        createdAtMs: now,
+        updatedAtMs: now,
+      };
+
+      setMyNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== notifId)]);
+
+      try {
+        const key = `ejar_notifications_${payload.recipientId}`;
+        const stored = JSON.parse(localStorage.getItem(key) || '[]') as NotificationRecord[];
+        localStorage.setItem(key, JSON.stringify([newNotif, ...stored.slice(0, 49)]));
+      } catch {}
+
+      if (sessionTokenReady && db) {
+        try {
+          await setDoc(doc(db, 'notifications', notifId), {
+            ...newNotif,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch {}
+      }
+    },
+    [sessionTokenReady]
+  );
+
+  const handleMarkNotificationRead = useCallback(
+    async (notifId: string) => {
+      setMyNotifications((prev) =>
+        prev.map((n) => (n.id === notifId ? { ...n, isRead: true, updatedAtMs: Date.now() } : n))
+      );
+      const activeUid = effectiveUser?.uid;
+      if (activeUid) {
+        try {
+          const key = `ejar_notifications_${activeUid}`;
+          const stored = JSON.parse(localStorage.getItem(key) || '[]') as NotificationRecord[];
+          localStorage.setItem(
+            key,
+            JSON.stringify(stored.map((n) => (n.id === notifId ? { ...n, isRead: true } : n)))
+          );
+        } catch {}
+      }
+      if (sessionTokenReady && db) {
+        try {
+          await updateDoc(doc(db, 'notifications', notifId), {
+            isRead: true,
+            updatedAt: serverTimestamp(),
+          });
+        } catch {}
+      }
+    },
+    [effectiveUser?.uid, sessionTokenReady]
+  );
+
+  const handleMarkAllNotificationsRead = useCallback(async () => {
+    setMyNotifications((prev) =>
+      prev.map((n) => ({ ...n, isRead: true, updatedAtMs: Date.now() }))
+    );
+    const activeUid = effectiveUser?.uid;
+    if (activeUid) {
+      try {
+        const key = `ejar_notifications_${activeUid}`;
+        const stored = JSON.parse(localStorage.getItem(key) || '[]') as NotificationRecord[];
+        localStorage.setItem(
+          key,
+          JSON.stringify(stored.map((n) => ({ ...n, isRead: true })))
+        );
+      } catch {}
+    }
+    if (sessionTokenReady && db) {
+      try {
+        const unread = myNotifications.filter((n) => !n.isRead);
+        const batch = writeBatch(db);
+        unread.forEach((n) => {
+          batch.update(doc(db, 'notifications', n.id), {
+            isRead: true,
+            updatedAt: serverTimestamp(),
+          });
+        });
+        await batch.commit();
+      } catch {}
+    }
+  }, [effectiveUser?.uid, myNotifications, sessionTokenReady]);
+
+  const handleClearAllNotifications = useCallback(async () => {
+    setMyNotifications([]);
+    const activeUid = effectiveUser?.uid;
+    if (activeUid) {
+      try {
+        localStorage.removeItem(`ejar_notifications_${activeUid}`);
+      } catch {}
+    }
+  }, [effectiveUser?.uid]);
+
   const handleWalletDeposit = useCallback(
     async (
       amountEgp: number,
@@ -667,6 +818,14 @@ export function App() {
       try {
         await recordSupabaseDeposit(activeUid, amountEgp, method, reference, receiptScreenshotUrl);
         setWallet(await fetchSupabaseWallet(activeUid));
+        void pushInAppNotification({
+          recipientId: activeUid,
+          statusType: 'wallet_deposit',
+          relatedEntityType: 'wallet',
+          amountEgp,
+          title: 'تم تسجيل إيداع بمحفظتك (قيد التأكيد)',
+          message: `تم تسجيل طلب شحن المحفظة بمبلغ ${formatEgp(amountEgp)} ج.م برقم مرجعي (${reference}) عبر ${method}؛ سيتم إضافة المبلغ لرصيدك فور التأكيد.`,
+        });
         if (receiptScreenshotUrl) {
           showToast(
             `تم حفظ إيصال التحويل في Supabase. سيُضاف مبلغ ${formatEgp(amountEgp)} بعد الاعتماد.`
@@ -678,7 +837,7 @@ export function App() {
         showToast(err instanceof Error ? err.message : 'تعذر حفظ الإيداع في Supabase');
       }
     },
-    [showToast, currentUser?.uid, userAccountData?.uid, isBlueVerified, t]
+    [showToast, currentUser?.uid, userAccountData?.uid, isBlueVerified, t, pushInAppNotification]
   );
 
   const handleApproveDeposit = useCallback(
@@ -689,12 +848,20 @@ export function App() {
       try {
         await approveSupabaseDeposit(txId, activeUid, target.amountEgp);
         setWallet(await fetchSupabaseWallet(activeUid));
+        void pushInAppNotification({
+          recipientId: activeUid,
+          statusType: 'wallet_deposit',
+          relatedEntityType: 'wallet',
+          amountEgp: target.amountEgp,
+          title: 'تم اعتماد شحن المحفظة بنجاح ✓',
+          message: `تم تأكيد إيداع ${formatEgp(target.amountEgp)} ج.م وإضافتها إلى رصيدك المتاح في محفظة المنصة. يمكنك الآن استخدامها للحجز ودفع الضمان.`,
+        });
         showToast('تم اعتماد الإيصال وإضافة المبلغ إلى الرصيد في Supabase');
       } catch (err) {
         showToast(err instanceof Error ? err.message : 'تعذر اعتماد الإيداع في Supabase');
       }
     },
-    [showToast, wallet.transactions, currentUser?.uid, userAccountData?.uid]
+    [showToast, wallet.transactions, currentUser?.uid, userAccountData?.uid, pushInAppNotification]
   );
 
   const handleWalletDeduct = useCallback(
@@ -705,8 +872,18 @@ export function App() {
       }
       await lockSupabaseEscrow(activeUid, amountEgp, apartmentId, apartmentTitle);
       setWallet(await fetchSupabaseWallet(activeUid));
+      void pushInAppNotification({
+        recipientId: activeUid,
+        statusType: 'payment_received',
+        relatedEntityType: 'wallet',
+        apartmentId,
+        apartmentTitle,
+        amountEgp,
+        title: 'تم خصم قيمة الحجز بالضمان من محفظتك',
+        message: `تم سداد ${formatEgp(amountEgp)} ج.م من رصيد محفظتك لحساب الضمان لوحدة «${apartmentTitle}».`,
+      });
     },
-    [currentUser?.uid, userAccountData?.uid]
+    [currentUser?.uid, userAccountData?.uid, pushInAppNotification]
   );
 
   const handleCompleteLandlordKyc = useCallback(
@@ -745,6 +922,13 @@ export function App() {
         ...prev.filter((item) => item.userId !== targetUid),
       ]);
       showToast(`🤖 قرار فوري من مراقب الذكاء الاصطناعي: تم حظر الحساب لمخالفة القوانين (${reason})`);
+      void pushInAppNotification({
+        recipientId: targetUid,
+        statusType: 'account_ban',
+        relatedEntityType: 'security',
+        title: '⛔ قرار أمني فوري: تم حظر الحساب',
+        message: `قام مراقب الذكاء الاصطناعي بتجميد حسابك وإخفاء إعلاناتك لمخالفة القوانين: ${reason}. يمكنك التواصل مع إدارة المنصة للاستفسار أو مراجعة الحظر.`,
+      });
       try {
         await banSupabaseUser(banRecord);
       } catch {
@@ -2692,6 +2876,22 @@ export function App() {
                   <span>{lang === 'ar' ? 'EN' : 'عربي'}</span>
                 </button>
 
+                {/* In-App Notifications Inbox Bell Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsNotificationsModalOpen(true)}
+                  title={t('صندوق إشعارات المنصة', 'Platform Notifications Inbox')}
+                  aria-label={t('صندوق الإشعارات', 'Notifications Inbox')}
+                  className="relative p-2 text-slate-700 hover:text-blue-700 bg-slate-100 hover:bg-blue-50 border border-slate-200 rounded-xl transition-all shadow-xs shrink-0"
+                >
+                  <Bell className="w-4 h-4 text-slate-700" />
+                  {unreadNotificationsCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white font-mono text-[10px] font-bold rounded-full h-4 min-w-4 px-1 flex items-center justify-center border-2 border-white shadow-xs animate-pulse">
+                      {unreadNotificationsCount > 9 ? '+9' : unreadNotificationsCount}
+                    </span>
+                  )}
+                </button>
+
                 {/* Unified Profile Hub Button (Contains Wallet, KYC, Photo & Account Completion) */}
                 {currentUser || userAccountData ? (
                   <div className="flex items-center gap-2">
@@ -3049,6 +3249,18 @@ export function App() {
                       createdApt,
                       ...prev.filter((item) => item.id !== createdApt.id),
                     ]);
+                    if (effectiveUser) {
+                      void pushInAppNotification({
+                        recipientId: effectiveUser.uid,
+                        statusType: 'listing_published',
+                        relatedEntityType: 'apartment',
+                        apartmentId: createdApt.id,
+                        apartmentTitle: createdApt.title,
+                        governorate: createdApt.governorate,
+                        title: 'تم نشر وحدتك بنجاح على الخريطة ✓',
+                        message: `تم توثيق ونشر وحدتك «${createdApt.title}» في محافظة ${createdApt.governorate}؛ أصبحت معروضة للزوار وبانتظار طلبات الحجز.`,
+                      });
+                    }
                   }
                   void fetchSupabaseApartments().then(setVerifiedDbApartments).catch(() => undefined);
                   setActiveTab('my_contracts');
@@ -3246,7 +3458,9 @@ export function App() {
           {/* Mobile Sticky Bottom Tab Navigation */}
           <nav
             aria-label={t('تنقل الجوال', 'Mobile Navigation')}
-            className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 grid grid-cols-4 h-16"
+            className={`md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 grid ${
+              isAdmin ? 'grid-cols-5' : 'grid-cols-4'
+            } h-16`}
           >
             <button
               type="button"
@@ -3276,15 +3490,22 @@ export function App() {
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span className="whitespace-nowrap">
-                {t('عقودي', 'Contracts')}
-                {unreadNotificationsCount > 0 ? (
-                  <span className="font-mono tabular-nums font-bold text-blue-700">
-                    {' '}
-                    ({formatNumber(unreadNotificationsCount)})
+              <span className="whitespace-nowrap">{t('عقودي', 'Contracts')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsNotificationsModalOpen(true)}
+              className="relative flex flex-col items-center justify-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-blue-700"
+            >
+              <div className="relative">
+                <Bell className="w-4 h-4" />
+                {unreadNotificationsCount > 0 && (
+                  <span className="absolute -top-1 -right-2 bg-rose-600 text-white font-mono text-[9px] font-bold rounded-full h-3.5 min-w-3.5 px-0.5 flex items-center justify-center border border-white animate-pulse">
+                    {unreadNotificationsCount > 9 ? '+9' : unreadNotificationsCount}
                   </span>
-                ) : null}
-              </span>
+                )}
+              </div>
+              <span className="whitespace-nowrap">{t('الإشعارات', 'Alerts')}</span>
             </button>
             {isAdmin && (
               <button
@@ -3393,11 +3614,35 @@ export function App() {
               setRentedDeletedIds((prev) => new Set(prev).add(aptId));
             }}
             onBookingCompleted={() => {
+              if (effectiveUser && checkoutApartment) {
+                void pushInAppNotification({
+                  recipientId: effectiveUser.uid,
+                  statusType: 'booking_confirmed',
+                  relatedEntityType: 'booking',
+                  apartmentId: checkoutApartment.id,
+                  apartmentTitle: checkoutApartment.title,
+                  governorate: checkoutApartment.governorate,
+                  title: 'تم تأكيد حجز الوحدة وسداد الضمان بنجاح ✓',
+                  message: `تم سداد وتوثيق حجز «${checkoutApartment.title}» في حساب الضمان للمنصة؛ أصبح عقدك سارياً ومحفوظاً.`,
+                });
+              }
               setCheckoutApartment(null);
               setActiveCheckoutRequest(null);
               setActiveTab('my_contracts');
             }}
             onRentalRequestSubmitted={() => {
+              if (effectiveUser && checkoutApartment) {
+                void pushInAppNotification({
+                  recipientId: effectiveUser.uid,
+                  statusType: 'pending_approval',
+                  relatedEntityType: 'rental_request',
+                  apartmentId: checkoutApartment.id,
+                  apartmentTitle: checkoutApartment.title,
+                  governorate: checkoutApartment.governorate,
+                  title: 'تم إرسال طلب الحجز إلى المالك',
+                  message: `تم تقديم طلب استئجار «${checkoutApartment.title}» بنجاح وهو بانتظار مراجعة وقبول المالك لفتح بوابة السداد.`,
+                });
+              }
               setCheckoutApartment(null);
               setActiveCheckoutRequest(null);
               setActiveTab('my_contracts');
@@ -3562,6 +3807,21 @@ export function App() {
             onClose={() => setIsWalletModalOpen(false)}
             onDeposit={handleWalletDeposit}
             onApproveDeposit={handleApproveDeposit}
+          />
+
+          {/* 5.1 Platform Notifications Inbox Modal */}
+          <NotificationsInboxModal
+            isOpen={isNotificationsModalOpen}
+            onClose={() => setIsNotificationsModalOpen(false)}
+            notifications={myNotifications}
+            onMarkAsRead={handleMarkNotificationRead}
+            onMarkAllAsRead={handleMarkAllNotificationsRead}
+            onClearAll={handleClearAllNotifications}
+            onOpenBookingTab={() => setActiveTab('my_contracts')}
+            onOpenWalletModal={() => {
+              setIsNotificationsModalOpen(false);
+              setIsWalletModalOpen(true);
+            }}
           />
 
           {/* 6. Password Recovery Modal (Triggered when returning from Gmail Reset Link) */}
