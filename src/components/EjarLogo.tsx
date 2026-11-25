@@ -24,12 +24,12 @@ export const EjarLogo: React.FC<EjarLogoProps> = ({
     size === 'xs'
       ? 'w-6 h-6'
       : size === 'sm'
-      ? 'w-7 h-7'
+      ? 'w-8 h-8'
       : size === 'lg'
-      ? 'w-10 h-10'
-      : size === 'xl'
       ? 'w-12 h-12'
-      : 'w-8 h-8';
+      : size === 'xl'
+      ? 'w-14 h-14'
+      : 'w-10 h-10';
 
   const wordmarkSize =
     size === 'xs'
@@ -44,39 +44,12 @@ export const EjarLogo: React.FC<EjarLogoProps> = ({
 
   return (
     <span className={`inline-flex items-center gap-2.5 whitespace-nowrap shrink-0 select-none ${className}`}>
-      {/* Official Unified Ejar Emblem Icon */}
-      <svg
-        viewBox="0 0 40 40"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-        className={`${iconDimensions} shrink-0 drop-shadow-xs transition-transform`}
-      >
-        {/* Royal Sapphire Architectural Rounded Square */}
-        <rect width="40" height="40" rx="11" fill="#1D4ED8" />
-        <rect
-          x="1"
-          y="1"
-          width="38"
-          height="38"
-          rx="10"
-          stroke="#FFFFFF"
-          strokeOpacity="0.2"
-        />
-
-        {/* Modern Egyptian Architectural Arch Doorway in Crisp White */}
-        <path
-          d="M11 32V20.5C11 14.4 15.2 9.8 20 8C24.8 9.8 29 14.4 29 20.5V32H24.6V21C24.6 17.4 22.6 14.5 20 13.2C17.4 14.5 15.4 17.4 15.4 21V32H11Z"
-          fill="#FFFFFF"
-        />
-
-        {/* Golden Key Centered Inside the Portal Arch */}
-        <circle cx="20" cy="19.5" r="2.75" fill="#FBBF24" />
-        <path
-          d="M18.9 21.8H21.1V29.5H23.1V31.5H21.1V32H18.9V21.8Z"
-          fill="#FBBF24"
-        />
-      </svg>
+      {/* Official Ejar Egypt Emblem */}
+      <img
+        src="/ejar-emblem.png"
+        alt={t('إيجار مصر', 'Rent Egypt')}
+        className={`${iconDimensions} rounded-full object-cover shrink-0 shadow-xs transition-transform`}
+      />
 
       {/* Unified Wordmark */}
       {showWordmark && (
@@ -86,7 +59,7 @@ export const EjarLogo: React.FC<EjarLogoProps> = ({
               light ? 'text-white' : 'text-slate-900'
             }`}
           >
-            {t('إيجار', 'Ejar')}
+            {t('إيجار مصر', 'Rent Egypt')}
           </span>
           {showSubtitle && (
             <span
@@ -94,7 +67,7 @@ export const EjarLogo: React.FC<EjarLogoProps> = ({
                 light ? 'text-blue-200' : 'text-blue-700'
               }`}
             >
-              {subtitle || 'EJAR.COM'}
+              {subtitle || 'RENT EGYPT'}
             </span>
           )}
         </div>
