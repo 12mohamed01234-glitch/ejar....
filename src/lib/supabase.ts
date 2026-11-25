@@ -12,7 +12,11 @@ import {
   PlatformSettingsRecord,
   normalizePlatformSettings,
   BannedUserRecord,
+  VALIDATION_LIMITS,
   computeEjarEscrowPricing,
+  PaymentTransactionRecord,
+  PaymentChannelMode,
+  PaymentTransactionStatus,
 } from './validation';
 import { UserAccountData } from '../components/AuthModal';
 
@@ -920,7 +924,7 @@ export async function fetchSupabaseBookings(userId: string): Promise<BookingReco
 export async function createSupabaseBooking(record: BookingRecord): Promise<BookingRecord> {
   const firstMonthPricing = computeEjarEscrowPricing(
     record.unitPriceEgp || record.monthlyRentEgp || record.totalRentEgp,
-    record.totalRentEgp
+    record.commissionRatePct || VALIDATION_LIMITS.DEFAULT_COMMISSION_PCT
   );
   const row = {
     id: record.id,
@@ -1147,7 +1151,7 @@ export async function lockSupabaseEscrow(
 
   const balance = Number(w?.balance_egp) || 0;
   if (balance < amountEgp) {
-    throw new Error('الرصيد المتاح غير كافٍ لخصم وديعة الضمان 10%');
+    throw new Error('الرصيد المتاح غير كافٍ لسداد مبلغ الضمان والعمولة المطلوب');
   }
 
   const txId = `tx_${Date.now()}`;
@@ -1157,7 +1161,7 @@ export async function lockSupabaseEscrow(
     user_id: userId,
     type: 'booking_escrow_hold',
     amount_egp: amountEgp,
-    description: `حجز وديعة ضمان 10% — ${apartmentTitle}`,
+    description: `حجز وسداد ضمان المنصة — ${apartmentTitle}`,
     payment_method: 'wallet_balance',
     reference_number: apartmentId,
     status: 'confirmed',
@@ -1178,4 +1182,157 @@ export async function lockSupabaseEscrow(
     { onConflict: 'user_id' }
   );
   assertNoError(walletError, 'تجميد وديعة الضمان');
+}
+
+// ==============================================================================
+// 5. PAYMENTS & PROOF TRANSACTIONS SERVICE (public.payments)
+// ==============================================================================
+function mapRowToPaymentTransaction(row: Record<string, unknown>): PaymentTransactionRecord {
+  return {
+    id: String(row.id || ''),
+    referenceCode: String(row.reference_code || ''),
+    userId: String(row.user_id || ''),
+    userDisplayName: String(row.user_display_name || 'مستأجر'),
+    landlordId: String(row.landlord_id || ''),
+    landlordDisplayName: String(row.landlord_display_name || 'مالك العقار'),
+    apartmentId: String(row.apartment_id || ''),
+    apartmentTitle: String(row.apartment_title || 'وحدة عقارية'),
+    bookingId: row.booking_id ? String(row.booking_id) : undefined,
+    amountEgp: Number(row.amount_egp) || 0,
+    totalRentEgp: Number(row.total_rent_egp) || 0,
+    landlordRemainingEgp: Number(row.landlord_remaining_egp) || 0,
+    paymentMethod: (row.payment_method as PaymentTransactionRecord['paymentMethod']) || 'instapay',
+    channelMode: (row.channel_mode as PaymentChannelMode) || 'manual_transfer',
+    status: (row.status as PaymentTransactionStatus) || 'pending_verification',
+    bookingStatus:
+      (row.booking_status as PaymentTransactionRecord['bookingStatus']) || 'pending_verification',
+    proofUrl: row.proof_url ? String(row.proof_url) : undefined,
+    payerReferenceNote: row.payer_reference_note ? String(row.payer_reference_note) : undefined,
+    isDemo: Boolean(row.is_demo ?? false),
+    createdAtMs: row.created_at ? new Date(String(row.created_at)).getTime() : Date.now(),
+    updatedAtMs: row.updated_at ? new Date(String(row.updated_at)).getTime() : Date.now(),
+  };
+}
+
+export async function createSupabasePaymentTransaction(
+  record: PaymentTransactionRecord
+): Promise<PaymentTransactionRecord> {
+  const row = {
+    id: record.id,
+    reference_code: record.referenceCode,
+    user_id: record.userId,
+    user_display_name: record.userDisplayName,
+    landlord_id: record.landlordId,
+    landlord_display_name: record.landlordDisplayName,
+    apartment_id: record.apartmentId,
+    apartment_title: record.apartmentTitle,
+    booking_id: record.bookingId || null,
+    amount_egp: record.amountEgp,
+    total_rent_egp: record.totalRentEgp,
+    landlord_remaining_egp: record.landlordRemainingEgp,
+    payment_method: record.paymentMethod,
+    channel_mode: record.channelMode,
+    status: record.status,
+    booking_status: record.bookingStatus,
+    proof_url: record.proofUrl || null,
+    payer_reference_note: record.payerReferenceNote || null,
+    is_demo: Boolean(record.isDemo ?? false),
+    created_at: new Date(record.createdAtMs).toISOString(),
+    updated_at: new Date(record.updatedAtMs).toISOString(),
+  };
+
+  const { error } = await supabase.from('payments').insert(row);
+  if (error) {
+    console.error('[Supabase Payments Insert Failed]:', error);
+    assertNoError(error, 'تسجيل معاملة الدفع');
+  }
+
+  const cached = getLocal<PaymentTransactionRecord[]>(`payments_user_${record.userId}`, []);
+  setLocal(`payments_user_${record.userId}`, [record, ...cached.filter((p) => p.id !== record.id)]);
+
+  return record;
+}
+
+export async function fetchSupabaseUserPayments(
+  userId: string
+): Promise<PaymentTransactionRecord[]> {
+  if (!userId) return [];
+  try {
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (isMissingTableError(error)) {
+        return getLocal<PaymentTransactionRecord[]>(`payments_user_${userId}`, []);
+      }
+      assertNoError(error, 'جلب سجل المعاملات');
+    }
+
+    const mapped = (data || []).map((r) => mapRowToPaymentTransaction(r as Record<string, unknown>));
+    setLocal(`payments_user_${userId}`, mapped);
+    return mapped;
+  } catch (err) {
+    console.warn('[Supabase User Payments Fetch Notice]:', err);
+    return getLocal<PaymentTransactionRecord[]>(`payments_user_${userId}`, []);
+  }
+}
+
+export async function fetchSupabaseLandlordPayments(
+  landlordId: string
+): Promise<PaymentTransactionRecord[]> {
+  if (!landlordId) return [];
+  try {
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('landlord_id', landlordId)
+      .eq('is_demo', false)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (isMissingTableError(error)) {
+        return [];
+      }
+      assertNoError(error, 'جلب مدفوعات وحدات المالك');
+    }
+
+    return (data || []).map((r) => mapRowToPaymentTransaction(r as Record<string, unknown>));
+  } catch (err) {
+    console.warn('[Supabase Landlord Payments Fetch Notice]:', err);
+    return [];
+  }
+}
+
+export async function updateSupabasePaymentStatus(
+  paymentId: string,
+  updates: {
+    status: PaymentTransactionStatus;
+    bookingStatus: PaymentTransactionRecord['bookingStatus'];
+    bookingId?: string;
+  }
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    status: updates.status,
+    booking_status: updates.bookingStatus,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from('payments').update(payload).eq('id', paymentId);
+  if (error) {
+    console.error('[Supabase Payment Update Failed]:', error);
+    assertNoError(error, 'تحديث حالة المعاملة');
+  }
+
+  if (updates.bookingId) {
+    await supabase
+      .from('bookings')
+      .update({
+        status: updates.bookingStatus === 'pending_verification' ? 'awaiting_payment' : updates.bookingStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', updates.bookingId);
+  }
 }

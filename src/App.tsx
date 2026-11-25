@@ -110,6 +110,7 @@ import { TenantVerificationModal, TenantVerificationData } from './components/Te
 import { KycVerificationPage, KycVerificationData } from './components/KycVerificationPage';
 import { PublicProfilePage, PublicProfileUser } from './components/PublicProfilePage';
 import { NotificationsInboxModal } from './components/NotificationsInboxModal';
+import { LegalPolicyModal, PolicyType } from './components/LegalPolicyModal';
 import {
   supabase,
   fetchSupabaseApartments,
@@ -313,6 +314,7 @@ export function App() {
   const [myTenantVerification, setMyTenantVerification] =
     useState<TenantVerificationRecord | null>(null);
   const [myBanRecord, setMyBanRecord] = useState<BannedUserRecord | null>(null);
+  const [legalModalOpen, setLegalModalOpen] = useState<PolicyType | null>(null);
   const [supabaseBannedUsers, setSupabaseBannedUsers] = useState<BannedUserRecord[]>([]);
 
   useEffect(() => {
@@ -3468,7 +3470,7 @@ export function App() {
           {/* Architectural Footer */}
           <footer className="bg-white border-t border-slate-200 py-6">
             <div className="max-w-[1440px] mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
                 <span className="font-semibold text-slate-800">{t('منصة إيجار', 'Ejar Platform')}</span>
                 <span aria-hidden="true">·</span>
                 <span>
@@ -3477,6 +3479,30 @@ export function App() {
                     'Verified real-estate escrow platform across all 27 Egyptian governorates'
                   )}
                 </span>
+                <span aria-hidden="true">·</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setLegalModalOpen('terms')}
+                    className="text-blue-700 hover:underline font-semibold"
+                  >
+                    {t('الشروط والأحكام', 'Terms & Conditions')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLegalModalOpen('privacy')}
+                    className="text-blue-700 hover:underline font-semibold"
+                  >
+                    {t('سياسة الخصوصية', 'Privacy Policy')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLegalModalOpen('cancellation')}
+                    className="text-blue-700 hover:underline font-semibold"
+                  >
+                    {t('سياسة الإلغاء والاسترداد', 'Cancellation Policy')}
+                  </button>
+                </div>
               </div>
               <div className="font-mono tabular-nums text-slate-500">
                 {t(
@@ -3486,6 +3512,12 @@ export function App() {
               </div>
             </div>
           </footer>
+
+          <LegalPolicyModal
+            policyType={legalModalOpen}
+            onClose={() => setLegalModalOpen(null)}
+            lang={lang}
+          />
 
           {/* Mobile Sticky Bottom Tab Navigation */}
           <nav
@@ -3637,6 +3669,7 @@ export function App() {
             currentUser={effectiveUser}
             tenantWallet={wallet}
             onDeductWallet={handleWalletDeduct}
+            onOpenPolicy={(type) => setLegalModalOpen(type)}
             onRequestSignIn={async () => setIsAuthModalOpen(true)}
             onClose={() => {
               setCheckoutApartment(null);
@@ -3645,17 +3678,26 @@ export function App() {
             onApartmentRentedAndDeleted={(aptId) => {
               setRentedDeletedIds((prev) => new Set(prev).add(aptId));
             }}
-            onBookingCompleted={() => {
+            onBookingCompleted={(txStatus) => {
               if (effectiveUser && checkoutApartment) {
+                const isConfirmed = !txStatus || txStatus === 'confirmed';
                 void pushInAppNotification({
                   recipientId: effectiveUser.uid,
-                  statusType: 'booking_confirmed',
-                  relatedEntityType: 'booking',
+                  statusType: isConfirmed ? 'booking_confirmed' : 'payment_received',
+                  relatedEntityType: isConfirmed ? 'booking' : 'rental_request',
                   apartmentId: checkoutApartment.id,
                   apartmentTitle: checkoutApartment.title,
                   governorate: checkoutApartment.governorate,
-                  title: 'تم تأكيد حجز الوحدة وسداد الضمان بنجاح ✓',
-                  message: `تم سداد وتوثيق حجز «${checkoutApartment.title}» في حساب الضمان للمنصة؛ أصبح عقدك سارياً ومحفوظاً.`,
+                  title: isConfirmed
+                    ? 'تم تأكيد حجز الوحدة وسداد الضمان بنجاح ✓'
+                    : txStatus === 'pending_verification'
+                      ? 'تم تسجيل طلب التحويل وإرفاق الإثبات للمراجعة'
+                      : 'تم إرسال طلب الحجز المبدئي للمالك',
+                  message: isConfirmed
+                    ? `تم سداد وتوثيق حجز «${checkoutApartment.title}» في حساب الضمان للمنصة؛ أصبح عقدك سارياً ومحفوظاً.`
+                    : txStatus === 'pending_verification'
+                      ? `تم حفظ إثبات التحويل لوحدة «${checkoutApartment.title}» في سجل المعاملات بانتظار المراجعة.`
+                      : `تم تسجيل طلب الحجز المبدئي لوحدة «${checkoutApartment.title}» بانتظار موافقة المالك.`,
                 });
               }
               setCheckoutApartment(null);

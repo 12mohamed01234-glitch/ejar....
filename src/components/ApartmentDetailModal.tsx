@@ -211,26 +211,29 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
     typeof apartment.baseMonthlyPrice === 'number' &&
     apartment.baseMonthlyPrice > 0;
 
+  const isHotelRoom = apartment.category === 'hotel_room';
   const canCalcDaily =
-    apartment.dailyRateEgp > 0 && apartment.billingMode === 'daily_or_monthly';
+    isHotelRoom && apartment.dailyRateEgp > 0 && apartment.billingMode === 'daily_or_monthly';
   const canCalcStudentBed =
     apartment.studentBedsCount >= 1 && apartment.studentPricePerBedEgp >= 500;
 
+  const activeCalcRentalUnit: RentalUnitType =
+    calcRentalUnit === 'day' && !isHotelRoom ? 'month' : calcRentalUnit;
+
   const safeBedsCount =
-    calcRentalUnit === 'student_bed'
+    activeCalcRentalUnit === 'student_bed'
       ? Math.max(1, Math.min(apartment.studentBedsCount || 1, calcBedsCount))
       : 1;
-  const maxCalcDuration = calcRentalUnit === 'day' ? 90 : 36;
+  const maxCalcDuration = activeCalcRentalUnit === 'day' ? 90 : 36;
   const safeDuration = Math.max(1, Math.min(maxCalcDuration, calcDuration));
 
   const calcUnitRateEgp =
-    calcRentalUnit === 'day'
+    activeCalcRentalUnit === 'day'
       ? apartment.dailyRateEgp
-      : calcRentalUnit === 'student_bed'
+      : activeCalcRentalUnit === 'student_bed'
         ? apartment.studentPricePerBedEgp * safeBedsCount
         : apartment.monthlyRentEgp;
 
-  const rentSubtotalEgp = calcUnitRateEgp * safeDuration;
   const grossCommissionEgp = computeOneTimeCommission(
     calcUnitRateEgp,
     effectiveCommissionRatePct
@@ -240,7 +243,6 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
     tenantDiscountPct > 0
       ? Math.round((grossCommissionEgp * tenantDiscountPct) / 100)
       : 0;
-  const netCommissionFeeEgp = Math.max(0, grossCommissionEgp - commissionPromoDiscountEgp);
 
   const escrowProtectionFeePct = platformSettings?.escrowProtectionFeePct ?? 0;
   const escrowProtectionFeeEgp =
@@ -255,34 +257,17 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
       ? Math.max(0, Math.min(100000, Number(customMaintenancePerCycle)))
       : 0;
   const maintenancePerCycleEgp = includeMaintenance
-    ? calcRentalUnit === 'student_bed'
+    ? activeCalcRentalUnit === 'student_bed'
       ? parsedMaintenancePerCycle * safeBedsCount
       : parsedMaintenancePerCycle
     : 0;
-  const totalMaintenanceEgp = maintenancePerCycleEgp * safeDuration;
 
-  const firstCycleDueEgp =
-    calcUnitRateEgp +
-    netCommissionFeeEgp +
-    escrowProtectionFeeEgp +
-    securityDepositEgp +
-    maintenancePerCycleEgp;
-
-  const grandTotalLeaseCostEgp =
-    rentSubtotalEgp +
-    netCommissionFeeEgp +
-    escrowProtectionFeeEgp +
-    securityDepositEgp +
-    totalMaintenanceEgp;
-
-  /* ===== نظام الـ 20% الموحد على أول شهر فقط أياً كان عدد الشهور =====
-   * 10% عمولة المستأجر للمنصة + 10% دفعة مقدمة تُخصم من أول شهر (عمولة المالك محصلة مقدماً للمنصة)
-   * 20% إجمالي المطلوب سداده أونلاين الآن (على إيجار الشهر الأول فقط مهما كان عدد الشهور)
-   * المتبقي للمالك عند الاستلام: 90% من أول شهر + باقي الشهور كاملة بدون أي عمولة
-   */
-  const escrowPricing = computeEjarEscrowPricing(calcUnitRateEgp, rentSubtotalEgp);
+  /* ===== معادلة الحساب الديناميكية المرتبطة بإعدادات لوحة الأدمن ===== */
+  const escrowPricing = computeEjarEscrowPricing(calcUnitRateEgp, effectiveCommissionRatePct);
+  const ratePct = escrowPricing.commissionRatePct;
+  const remainingPct = escrowPricing.remainingRatePct;
   const earnestDepositEgp = escrowPricing.onlineDueTotalEgp;
-  const remainingOnHandoverEgp = escrowPricing.remainingPayableToLandlordEgp;
+  const remainingOnHandoverEgp = escrowPricing.remainingFirstMonthEgp;
 
   const liveCurrencyRates = buildLiveCurrencyRates(platformSettings);
   const formatCalcCurrency = (amountEgp: number) =>
@@ -816,13 +801,13 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
               )}
 
               {/* Student Housing / Hotel Multi-Rate Breakdown if Applicable */}
-              {(apartment.studentBedsCount > 0 || apartment.dailyRateEgp > 0) && (
+              {(apartment.studentBedsCount > 0 || (isHotelRoom && apartment.dailyRateEgp > 0)) && (
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
                   <h4 className="text-xs font-bold text-slate-900">
                     {t('خيارات التعاقد المتاحة لهذه الوحدة', 'Available Leasing Modes')}
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    {apartment.dailyRateEgp > 0 && (
+                    {isHotelRoom && apartment.dailyRateEgp > 0 && (
                       <div className="bg-white border border-slate-200 rounded-lg p-3">
                         <div className="text-slate-500">
                           {t('حجز يومي (بالليلة)', 'Daily Rate (Per Night)')}
@@ -1099,7 +1084,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                           type="button"
                           onClick={() => handleCalcModeSwitch('month')}
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap ${
-                            calcRentalUnit === 'month'
+                            activeCalcRentalUnit === 'month'
                               ? 'bg-slate-900 text-white border-slate-900'
                               : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                           }`}
@@ -1111,7 +1096,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                             type="button"
                             onClick={() => handleCalcModeSwitch('day')}
                             className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap ${
-                              calcRentalUnit === 'day'
+                              activeCalcRentalUnit === 'day'
                                 ? 'bg-slate-900 text-white border-slate-900'
                                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                             }`}
@@ -1124,7 +1109,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                             type="button"
                             onClick={() => handleCalcModeSwitch('student_bed')}
                             className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap ${
-                              calcRentalUnit === 'student_bed'
+                              activeCalcRentalUnit === 'student_bed'
                                 ? 'bg-slate-900 text-white border-slate-900'
                                 : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                             }`}
@@ -1140,9 +1125,9 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                   <div className="grid grid-cols-1 gap-2.5">
                     <div className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
                       <span className="text-[11px] font-semibold text-slate-700">
-                        {calcRentalUnit === 'day'
+                        {activeCalcRentalUnit === 'day'
                           ? t('مدة الإقامة (ليالي)', 'Stay Length (Nights)')
-                          : t('مدة الإيجار (شهور)', 'Lease Duration (Months)')}
+                          : t('عدد الشهور المختارة', 'Selected Months')}
                       </span>
                       <div className="flex items-center gap-1.5">
                         <button
@@ -1155,7 +1140,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                         </button>
                         <span className="min-w-[3.2rem] text-center font-mono tabular-nums text-xs font-bold text-slate-900">
                           {formatNumber(safeDuration)}{' '}
-                          {calcRentalUnit === 'day' ? t('ليلة', 'n') : t('شهر', 'mo')}
+                          {activeCalcRentalUnit === 'day' ? t('ليلة', 'n') : t('شهر', 'mo')}
                         </span>
                         <button
                           type="button"
@@ -1171,7 +1156,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1 flex-wrap">
-                      {(calcRentalUnit === 'day' ? [1, 3, 7, 14, 30] : [1, 3, 6, 12]).map(
+                      {(activeCalcRentalUnit === 'day' ? [1, 3, 7, 14, 30] : [1, 3, 6, 12]).map(
                         (preset) => (
                           <button
                             key={preset}
@@ -1184,13 +1169,13 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                             }`}
                           >
                             {formatNumber(preset)}{' '}
-                            {calcRentalUnit === 'day' ? t('ي', 'd') : t('ش', 'm')}
+                            {activeCalcRentalUnit === 'day' ? t('ي', 'd') : t('ش', 'm')}
                           </button>
                         )
                       )}
                     </div>
 
-                    {calcRentalUnit === 'student_bed' && (
+                    {activeCalcRentalUnit === 'student_bed' && (
                       <div className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
                         <span className="text-[11px] font-semibold text-slate-700">
                           {t('عدد السراير', 'Student Beds')}
@@ -1240,15 +1225,15 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                           { val: 0, label: t('بدون', 'None') },
                           {
                             val: 0.5,
-                            label: calcRentalUnit === 'day' ? '0.5×' : t('نصف شهر', '0.5 mo'),
+                            label: activeCalcRentalUnit === 'day' ? '0.5×' : t('نصف شهر', '0.5 mo'),
                           },
                           {
                             val: 1,
-                            label: calcRentalUnit === 'day' ? t('ليلة', '1 night') : t('شهر', '1 mo'),
+                            label: activeCalcRentalUnit === 'day' ? t('ليلة', '1 night') : t('شهر', '1 mo'),
                           },
                           {
                             val: 2,
-                            label: calcRentalUnit === 'day' ? t('ليلتين', '2 nights') : t('شهرين', '2 mos'),
+                            label: activeCalcRentalUnit === 'day' ? t('ليلتين', '2 nights') : t('شهرين', '2 mos'),
                           },
                         ] as const
                       ).map((opt) => (
@@ -1300,9 +1285,9 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                             className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[11px] font-mono tabular-nums text-end focus:outline-none focus:ring-2 focus:ring-blue-600"
                           />
                           <span className="text-[10px] text-slate-500">
-                            {calcRentalUnit === 'day'
+                            {activeCalcRentalUnit === 'day'
                               ? t('ج.م/ي', 'EGP/n')
-                              : calcRentalUnit === 'student_bed'
+                              : activeCalcRentalUnit === 'student_bed'
                                 ? t('ج.م/س', 'EGP/b')
                                 : t('ج.م/ش', 'EGP/m')}
                           </span>
@@ -1326,26 +1311,36 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                   <div className="pt-2 border-t border-slate-200 space-y-2 text-xs">
                     <div className="flex items-center justify-between gap-2 text-slate-700">
                       <span>
-                        {t('قيمة الإيجار الأساسية', 'Base Rent Subtotal')} (
-                        <span className="font-mono tabular-nums">
-                          {formatNumber(calcUnitRateEgp)} × {formatNumber(safeDuration)}
-                        </span>
-                        )
+                        {activeCalcRentalUnit === 'day'
+                          ? t('قيمة الليلة الفندقية', 'Nightly Room Rate')
+                          : t('قيمة الإيجار الشهري', 'Monthly Rent')}
                       </span>
                       <span className="font-mono tabular-nums font-semibold text-slate-900">
-                        {formatCalcCurrency(rentSubtotalEgp)}
+                        {formatCalcCurrency(calcUnitRateEgp)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 text-slate-700">
+                      <span>
+                        {activeCalcRentalUnit === 'day'
+                          ? t('مدة الإقامة المختارة', 'Selected Nights')
+                          : t('عدد الشهور المختارة', 'Selected Months')}
+                      </span>
+                      <span className="font-mono tabular-nums font-semibold text-slate-900">
+                        {formatNumber(safeDuration)}{' '}
+                        {activeCalcRentalUnit === 'day' ? t('ليلة', 'nights') : t('شهر', 'months')}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between gap-2 text-slate-700">
                       <span>
                         {t(
-                          `عمولة المنصة (${formatNumber(effectiveCommissionRatePct)}% مرة واحدة)`,
-                          `Platform Commission (${formatNumber(effectiveCommissionRatePct)}% once)`
+                          `نسبة العمولة/المقدم (${formatNumber(ratePct)}% من الشهر الأول)`,
+                          `Platform Fee/Advance (${formatNumber(ratePct)}% of 1st Month)`
                         )}
                       </span>
-                      <span className="font-mono tabular-nums font-semibold text-slate-900">
-                        {formatCalcCurrency(grossCommissionEgp)}
+                      <span className="font-mono tabular-nums font-semibold text-blue-700">
+                        {formatCalcCurrency(earnestDepositEgp)}
                       </span>
                     </div>
 
@@ -1388,50 +1383,30 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
 
                     <div className="flex items-center justify-between gap-2 text-slate-700">
                       <span>
-                        {t('رسوم الصيانة والخدمات', 'Maintenance & Upkeep')}
-                        {includeMaintenance && maintenancePerCycleEgp > 0 && (
-                          <span className="text-[10px] text-slate-500 ms-1 font-mono tabular-nums">
-                            ({formatNumber(maintenancePerCycleEgp)} × {formatNumber(safeDuration)})
-                          </span>
-                        )}
+                        {t('رسوم الصيانة والخدمات (شهرياً)', 'Maintenance & Upkeep (Monthly)')}
                       </span>
                       <span className="font-mono tabular-nums font-semibold text-slate-900">
-                        {formatCalcCurrency(totalMaintenanceEgp)}
+                        {formatCalcCurrency(maintenancePerCycleEgp)}
                       </span>
                     </div>
 
-                    {/* Two-Tier Total Summary: Upfront Move-In vs Full Stay Total */}
+                    {/* First Month Handover Summary */}
                     <div className="pt-2.5 mt-1 border-t border-slate-200 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
-                        <span>
-                          {calcRentalUnit === 'day'
-                            ? t('تقدير الدفعة الأولى (ليلة + رسوم + تأمين)', 'Est. Due Day 1 (Night 1 + Fees + Deposit)')
-                            : t('تقدير دفعة التعاقد الأولى (شهر 1 + رسوم + تأمين)', 'Est. Move-In Cost (Mo 1 + Fees + Deposit)')}
-                        </span>
-                        <span className="font-mono tabular-nums font-bold text-slate-900">
-                          {formatCalcCurrency(firstCycleDueEgp)}
-                        </span>
-                      </div>
-
                       <div className="flex items-baseline justify-between gap-2 bg-blue-50/80 border border-blue-200 rounded-lg px-3 py-2">
                         <div>
                           <div className="text-xs font-bold text-slate-900">
-                            {t('التكلفة الإجمالية التقديرية', 'Estimated Grand Total')}
+                            {t('المستحق دفعه أونلاين الآن (الشهر الأول)', 'Due Online Now (1st Month)')}
                           </div>
                           <div className="text-[10px] text-slate-500">
                             {t(
-                              `شامل الإيجار والعمولة والتأمين والصيانة (${formatNumber(safeDuration)} ${
-                                calcRentalUnit === 'day' ? 'ليالي' : 'أشهر'
-                              })`,
-                              `Includes rent, commission, deposit & maintenance (${formatNumber(safeDuration)} ${
-                                calcRentalUnit === 'day' ? 'nights' : 'months'
-                              })`
+                              `بنسبة ${formatNumber(ratePct)}% المعتمدة من الإدارة`,
+                              `Admin-configured rate: ${formatNumber(ratePct)}%`
                             )}
                           </div>
                         </div>
                         <div className="text-end font-mono tabular-nums shrink-0">
                           <div className="text-base font-extrabold text-blue-700">
-                            {formatCalcCurrency(grandTotalLeaseCostEgp)}
+                            {formatCalcCurrency(earnestDepositEgp)}
                           </div>
                         </div>
                       </div>
@@ -1439,59 +1414,71 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                   </div>
                 </div>
 
-                {/* Escrow Deposit 20% Online / Remaining 90% on Handover */}
+                {/* Dynamic Admin-Configured Escrow Deposit / Remaining to Landlord */}
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Key className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                       <span className="text-xs font-bold text-slate-900">
-                        {t('نظام الضمان الرسمي (20% الآن / 90% للمالك عند الاستلام)', 'Platform Escrow (20% Online / 90% on Handover)')}
+                        {t(
+                          `ملخص الحجز (${formatNumber(ratePct)}% أونلاين / ${formatNumber(remainingPct)}% للمالك عند الاستلام)`,
+                          `Booking Summary (${formatNumber(ratePct)}% Online / ${formatNumber(remainingPct)}% on Handover)`
+                        )}
                       </span>
                     </div>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">
-                      {t('إلزامي', 'Required')}
+                      {t('معتمد من الإدارة', 'Admin Rate')}
                     </span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <div className="bg-white/60 p-2 rounded-lg border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">
-                        {t('إيجار الشهر الأول (أساس النسبة)', 'First Month Rent (Fee Basis)')}
+                        {activeCalcRentalUnit === 'day'
+                          ? t('قيمة الليلة الفندقية', 'Nightly Rate')
+                          : t('قيمة الإيجار الشهري', 'Monthly Rent')}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-slate-900 block">
                         {formatCalcCurrency(calcUnitRateEgp)}
+                      </span>
+                      <span className="text-[9px] text-slate-500 block mt-0.5">
+                        {t('المدة المختارة:', 'Selected Duration:')} {formatNumber(safeDuration)}{' '}
+                        {activeCalcRentalUnit === 'day' ? t('ليلة', 'n') : t('شهر', 'mo')}
                       </span>
                     </div>
 
                     <div className="bg-blue-50 p-2 rounded-lg border border-blue-200">
                       <span className="text-[10px] text-blue-700 font-bold block">
-                        {t('20% المطلوب أونلاين (على أول شهر فقط)', '20% Paid Online (1st Month Only)')}
+                        {t(
+                          `المستحق أونلاين الآن (${formatNumber(ratePct)}% من الشهر الأول)`,
+                          `Due Online Now (${formatNumber(ratePct)}% 1st Month)`
+                        )}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-blue-700 block">
                         {formatCalcCurrency(earnestDepositEgp)}
                       </span>
                       <span className="text-[9px] text-slate-500 block mt-0.5">
-                        {t('10% عمولة المنصة + 10% مقدم أول شهر أياً كان عدد الشهور', '10% fee + 10% 1st month advance regardless of duration')}
+                        {t(
+                          `يُحتسب ويُخصم من الشهر الأول فقط`,
+                          `Calculated & deducted from 1st month only`
+                        )}
                       </span>
                     </div>
 
-                    <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                    <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200 sm:col-span-2">
                       <span className="text-[10px] text-emerald-700 font-bold block">
-                        {t('المتبقي للمالك عند المقابلة والاستلام', 'Due to Landlord on Handover')}
+                        {t(
+                          `المتبقي للمالك عند المقابلة والاستلام (${formatNumber(remainingPct)}% من الشهر الأول)`,
+                          `Due to Landlord on Handover (${formatNumber(remainingPct)}% of 1st Month)`
+                        )}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-emerald-700 block">
                         {formatCalcCurrency(remainingOnHandoverEgp)}
                       </span>
                       <span className="text-[9px] text-slate-500 block mt-0.5">
-                        {t('90% من أول شهر + باقي الشهور كاملة بدون عمولة', '90% of 1st month + remaining months (0% extra fee)')}
-                      </span>
-                    </div>
-
-                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 sm:col-span-2">
-                      <span className="text-[10px] text-slate-600 block leading-relaxed">
                         {t(
-                          'أياً كان عدد الشهور المختارة، تُحسب نسبة المنصة (20%) على أول شهر فقط (10% عمولة المستأجر + 10% مقدم يُخصم من أول شهر عند المقابلة). وباقي الشهور كاملة للمالك دون أي عمولة.',
-                          'Regardless of the number of months, the platform 20% fee applies strictly to the first month only (10% tenant fee + 10% 1st-month advance deducted on handover).'
+                          `بعد خصم نسبة الـ ${formatNumber(ratePct)}% من إيجار الشهر الأول (${formatCalcCurrency(calcUnitRateEgp)} - ${formatCalcCurrency(earnestDepositEgp)})`,
+                          `1st month rent minus ${formatNumber(ratePct)}% deduction (${formatCalcCurrency(calcUnitRateEgp)} - ${formatCalcCurrency(earnestDepositEgp)})`
                         )}
                       </span>
                     </div>

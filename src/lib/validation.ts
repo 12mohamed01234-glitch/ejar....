@@ -88,7 +88,12 @@ export type PaymentMethodType =
   | 'mobile_wallet'
   | 'fawry'
   | 'wallet_balance';
-export type BookingStatus = 'escrow_paid' | 'completed';
+export type BookingStatus =
+  | 'pending_approval'
+  | 'awaiting_payment'
+  | 'escrow_paid'
+  | 'completed'
+  | 'cancelled';
 export type LandlordVerdict = 'trusted' | 'acceptable' | 'unreliable';
 export type ReviewVisibilityStatus = 'published' | 'hidden';
 export type RentalRequestStatus =
@@ -1288,46 +1293,93 @@ export function normalizeApartmentRecord(
   };
 }
 
+export type PaymentChannelMode =
+  | 'paymob_live'
+  | 'manual_transfer'
+  | 'wallet_balance'
+  | 'booking_request';
+
+export type PaymentTransactionStatus =
+  | 'pending_verification'
+  | 'pending_approval'
+  | 'confirmed'
+  | 'rejected'
+  | 'settled';
+
+export interface PaymentTransactionRecord {
+  id: string;
+  referenceCode: string;
+  userId: string;
+  userDisplayName: string;
+  landlordId: string;
+  landlordDisplayName: string;
+  apartmentId: string;
+  apartmentTitle: string;
+  bookingId?: string;
+  amountEgp: number;
+  totalRentEgp: number;
+  landlordRemainingEgp: number;
+  paymentMethod: PaymentMethodType | 'booking_request';
+  channelMode: PaymentChannelMode;
+  status: PaymentTransactionStatus;
+  bookingStatus: 'pending_approval' | 'pending_verification' | 'escrow_paid' | 'completed' | 'cancelled';
+  proofUrl?: string;
+  payerReferenceNote?: string;
+  isDemo?: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export function generatePaymentReferenceCode(prefix = 'EJAR'): string {
+  const stamp = Date.now().toString().slice(-6);
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${prefix}-${stamp}-${rand}`;
+}
+
 export interface EjarEscrowPricingStructure {
-  monthlyRentEgp: number; // 100% of first month / unit rent
-  tenantCommissionRatePct: number; // 10% of first month only
-  tenantCommissionEgp: number; // 10% of first month only
-  landlordCommissionRatePct: number; // 10% of first month only
-  landlordCommissionEgp: number; // 10% of first month only
-  onlineDueTotalEgp: number; // 20% of first month only (regardless of lease months)
-  remainingFirstMonthEgp: number; // 90% of first month due to landlord
-  remainingPayableToLandlordEgp: number; // 90% of 1st month + remaining months (with 0% extra fee)
-  totalLeaseCommitmentEgp: number; // total rent + 10% tenant commission on 1st month
+  monthlyRentEgp: number; // First month / unit rent (100%)
+  commissionRatePct: number; // Dynamic % configured in Admin Console (e.g. 10, 12)
+  remainingRatePct: number; // 100 - commissionRatePct (e.g. 90, 88)
+  tenantCommissionRatePct: number; // Dynamic rate from Admin Console
+  tenantCommissionEgp: number; // Online due based on dynamic rate
+  landlordCommissionRatePct: number; // Dynamic rate from Admin Console
+  landlordCommissionEgp: number; // Online due based on dynamic rate
+  onlineDueTotalEgp: number; // monthlyRent * (rate / 100) on 1st month only
+  remainingFirstMonthEgp: number; // monthlyRent - onlineDueTotalEgp
+  remainingPayableToLandlordEgp: number; // Remaining 1st month payable to landlord on handover
+  totalLeaseCommitmentEgp: number; // Unit base rent (without multiplying months)
 }
 
 /**
- * Standardized 20% upfront escrow formula across the entire site (FIRST MONTH ONLY, regardless of total months):
- * - 10% Tenant platform brokerage fee (on 1st month only)
- * - 10% Landlord fee paid upfront from 1st month's rent (deducted when tenant meets landlord)
- * - Remaining 90% of 1st month (+ 100% of any subsequent months) paid directly to landlord on handover
+ * Dynamic upfront escrow formula linked to Admin Console settings (FIRST MONTH ONLY):
+ * - rate = commissionRatePct configured in Admin Console (e.g. 10% or 12%)
+ * - onlineAmount = monthlyRent * (rate / 100)
+ * - ownerRemainingFirstMonth = monthlyRent - onlineAmount (e.g. 90% when rate=10%, 88% when rate=12%)
  */
 export function computeEjarEscrowPricing(
   firstMonthRentEgp: number,
-  totalLeaseRentEgp?: number
+  commissionRatePct: number = VALIDATION_LIMITS.DEFAULT_COMMISSION_PCT
 ): EjarEscrowPricingStructure {
   const safeFirstMonth = Math.max(0, Math.round(firstMonthRentEgp || 0));
-  const safeTotalLease = Math.max(safeFirstMonth, Math.round(totalLeaseRentEgp ?? safeFirstMonth));
-  const tenantFee = Math.round(safeFirstMonth * 0.10);
-  const landlordFee = Math.round(safeFirstMonth * 0.10);
-  const onlineDue = tenantFee + landlordFee; // exactly 20% of FIRST MONTH ONLY
-  const remainingFirstMonth = Math.max(0, safeFirstMonth - landlordFee); // 90% of first month
-  const remainingHandover = Math.max(0, safeTotalLease - landlordFee); // 90% of 1st month + rest of months
-  const totalCommitment = safeTotalLease + tenantFee;
+  const safeRate = Math.max(
+    VALIDATION_LIMITS.COMMISSION_MIN,
+    Math.min(VALIDATION_LIMITS.COMMISSION_MAX, Math.round(commissionRatePct))
+  );
+  const onlineDue = Math.round(safeFirstMonth * (safeRate / 100));
+  const remainingFirstMonth = Math.max(0, safeFirstMonth - onlineDue);
+  const remainingRate = Math.max(0, 100 - safeRate);
   return {
     monthlyRentEgp: safeFirstMonth,
-    tenantCommissionRatePct: 10,
-    tenantCommissionEgp: tenantFee,
-    landlordCommissionRatePct: 10,
-    landlordCommissionEgp: landlordFee,
+    commissionRatePct: safeRate,
+    remainingRatePct: remainingRate,
+    tenantCommissionRatePct: safeRate,
+    tenantCommissionEgp: onlineDue,
+    landlordCommissionRatePct: safeRate,
+    landlordCommissionEgp: onlineDue,
     onlineDueTotalEgp: onlineDue,
     remainingFirstMonthEgp: remainingFirstMonth,
-    remainingPayableToLandlordEgp: remainingHandover,
-    totalLeaseCommitmentEgp: totalCommitment,
+    remainingPayableToLandlordEgp: remainingFirstMonth,
+    totalLeaseCommitmentEgp: safeFirstMonth,
   };
 }
 
@@ -1415,20 +1467,14 @@ export function getPrimaryDisplayPrice(
       typeof apt.houseFloorsCount === 'number' && apt.houseFloorsCount > 0
         ? apt.houseFloorsCount
         : 2;
-    const dailySuffix =
-      apt.billingMode === 'daily_or_monthly' && apt.dailyRateEgp > 0
-        ? lang === 'ar'
-          ? ` · يومي ${fmt(apt.dailyRateEgp)} ج.م`
-          : ` · Daily ${fmt(apt.dailyRateEgp)} EGP`
-        : '';
     return {
       amountEgp: apt.monthlyRentEgp,
       unitLabel: lang === 'ar' ? 'ج.م / شهر (منزل كامل)' : 'EGP / mo (Whole House)',
       pinSuffix: lang === 'ar' ? 'ج.م / منزل' : 'EGP/house',
       secondaryNote:
         lang === 'ar'
-          ? `منزل يضم ${fmt(aptsCount)} شقق · ${fmt(floorsCount)} أدوار${dailySuffix}`
-          : `House with ${fmt(aptsCount)} apts · ${fmt(floorsCount)} floors${dailySuffix}`,
+          ? `منزل يضم ${fmt(aptsCount)} شقق · ${fmt(floorsCount)} أدوار`
+          : `House with ${fmt(aptsCount)} apts · ${fmt(floorsCount)} floors`,
     };
   }
   return {
@@ -2033,8 +2079,8 @@ export const SHOWCASE_APARTMENTS: ApartmentRecord[] = [
     ownerId: 'showcase_owner',
     ownerDisplayName: 'د. شريف الغمراوي',
     category: 'whole_house',
-    billingMode: 'daily_or_monthly',
-    dailyRateEgp: 6500,
+    billingMode: 'monthly_only',
+    dailyRateEgp: 0,
     monthlyRentEgp: 78000,
     studentBedsCount: 0,
     studentPricePerBedEgp: 0,
@@ -2046,7 +2092,7 @@ export const SHOWCASE_APARTMENTS: ApartmentRecord[] = [
       '3 شقق فاخرة مفروشة (شقة بكل دور) + تراس علوي وحديقة أمامية وجراج خاص وعدادات مرافق مستقلة',
     title: 'عقار وفيلا كاملة للإيجار في كفر عبده الإسكندرية — 3 شقق مستقلة',
     description:
-      'منزل كلاسيكي مجدد بالكامل في أرقى شوارع كفر عبده بالإسكندرية، يتكون من 3 أدوار تضم 3 شقق مفروشة بالكامل مع حديقة خاصة وجراج داخلي، متاح للإيجار الشهري الكامل أو الإقامة العائلية اليومية.',
+      'منزل كلاسيكي مجدد بالكامل في أرقى شوارع كفر عبده بالإسكندرية، يتكون من 3 أدوار تضم 3 شقق مفروشة بالكامل مع حديقة خاصة وجراج داخلي، متاح للإيجار الشهري الكامل.',
     governorate: 'الإسكندرية',
     district: 'كفر عبده — رشدي',
     lat: 31.2248,

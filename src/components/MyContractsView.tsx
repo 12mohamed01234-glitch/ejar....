@@ -26,6 +26,9 @@ import {
   Unlock,
   ShieldAlert,
   MessageSquareLock,
+  Receipt,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { db, logFirestoreDiagnostic, OperationType } from '../lib/firebase';
 import {
@@ -35,6 +38,7 @@ import {
   FavoriteRecord,
   NotificationRecord,
   NotificationStatusType,
+  PaymentTransactionRecord,
   PlatformSettingsRecord,
   RentalRequestRecord,
   ReviewRecord,
@@ -58,7 +62,13 @@ import {
 } from '../lib/validation';
 import { useI18n } from '../lib/i18n';
 import { ApartmentImage } from './ApartmentImage';
-import { updateSupabaseKycStatus, uploadSupabaseFile } from '../lib/supabase';
+import {
+  fetchSupabaseLandlordPayments,
+  fetchSupabaseUserPayments,
+  updateSupabaseKycStatus,
+  updateSupabasePaymentStatus,
+  uploadSupabaseFile,
+} from '../lib/supabase';
 
 interface MyContractsViewProps {
   currentUser: User | null;
@@ -166,6 +176,82 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
   const [isCompareDrawerOpen, setIsCompareDrawerOpen] = useState(false);
   const [compareOnlyDiffs, setCompareOnlyDiffs] = useState(false);
   const [compareNotice, setCompareNotice] = useState<string | null>(null);
+
+  // Real Supabase Payments & Landlord Settlement History
+  const [userPayments, setUserPayments] = useState<PaymentTransactionRecord[]>([]);
+  const [landlordPayments, setLandlordPayments] = useState<PaymentTransactionRecord[]>([]);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [settlingPaymentId, setSettlingPaymentId] = useState<string | null>(null);
+
+  const loadSupabasePayments = async () => {
+    if (!currentUser?.uid) return;
+    setLoadingPayments(true);
+    try {
+      const [uPay, lPay] = await Promise.all([
+        fetchSupabaseUserPayments(currentUser.uid),
+        fetchSupabaseLandlordPayments(currentUser.uid),
+      ]);
+      setUserPayments(uPay);
+      setLandlordPayments(lPay.filter((p) => !p.isDemo));
+    } finally {
+      setLoadingPayments(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSupabasePayments();
+  }, [currentUser?.uid]);
+
+  const handleMarkPaymentSettled = async (payment: PaymentTransactionRecord) => {
+    setActionError(null);
+    setSettlingPaymentId(payment.id);
+    try {
+      await updateSupabasePaymentStatus(payment.id, {
+        status: 'settled',
+        bookingStatus: 'completed',
+        bookingId: payment.bookingId,
+      });
+      await loadSupabasePayments();
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : t('تعذر تحديث حالة التسوية حالياً.', 'Could not update settlement status.')
+      );
+    } finally {
+      setSettlingPaymentId(null);
+    }
+  };
+
+  const formatPaymentStatusBadge = (p: PaymentTransactionRecord) => {
+    switch (p.status) {
+      case 'confirmed':
+        return {
+          text: t('مدفوع ومؤكد ✓', 'Paid & Confirmed ✓'),
+          cls: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        };
+      case 'settled':
+        return {
+          text: t('تم الاستلام والتسوية ✓', 'Settled & Completed ✓'),
+          cls: 'bg-blue-50 text-blue-800 border-blue-200',
+        };
+      case 'pending_verification':
+        return {
+          text: t('بانتظار مراجعة التحويل ⏳', 'Pending Transfer Review ⏳'),
+          cls: 'bg-amber-50 text-amber-900 border-amber-200',
+        };
+      case 'pending_approval':
+        return {
+          text: t('طلب حجز مبدئي ⏳', 'Preliminary Request ⏳'),
+          cls: 'bg-slate-100 text-slate-800 border-slate-300',
+        };
+      case 'rejected':
+        return {
+          text: t('مرفوض', 'Rejected'),
+          cls: 'bg-rose-50 text-rose-800 border-rose-200',
+        };
+    }
+  };
 
   useEffect(() => {
     if (myTenantVerification?.tenantCategory) {
@@ -1239,9 +1325,10 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                   const hasReview = allReviews.some(
                     (r) => r.bookingId === bk.id && r.tenantId === currentUser.uid
                   );
+                  const bkRatePct = bk.commissionRatePct || commissionRatePct;
                   const firstMonthPricing = computeEjarEscrowPricing(
                     bk.unitPriceEgp || bk.monthlyRentEgp || bk.totalRentEgp,
-                    bk.totalRentEgp
+                    bkRatePct
                   );
                   return (
                     <div
@@ -1251,22 +1338,39 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                       <div className="space-y-1">
                         <div className="text-xs text-slate-500 font-mono tabular-nums">
                           {bk.paymentReference} ·{' '}
-                          <span className="font-sans font-bold text-emerald-700">
+                          <span
+                            className={`font-sans font-bold ${
+                              bk.status === 'completed' || bk.status === 'escrow_paid'
+                                ? 'text-emerald-700'
+                                : bk.status === 'cancelled'
+                                  ? 'text-rose-700'
+                                  : 'text-amber-700'
+                            }`}
+                          >
                             {bk.status === 'completed'
                               ? t('تم استلام المفتاح وصرف الضمان', 'Key Handover Completed')
-                              : t('محفوظ في حساب الضمان', 'Protected in Escrow')}
+                              : bk.status === 'escrow_paid'
+                                ? t('مؤكد ومحفوظ بالضمان', 'Confirmed in Escrow')
+                                : bk.status === 'awaiting_payment'
+                                  ? t('بانتظار مراجعة وتأكيد الدفع', 'Pending Payment Verification')
+                                  : bk.status === 'pending_approval'
+                                    ? t('طلب حجز مبدئي بانتظار المالك', 'Preliminary Request')
+                                    : t('ملغي', 'Cancelled')}
                           </span>
                         </div>
                         <h4 className="text-sm font-bold text-slate-900">{bk.apartmentTitle}</h4>
                         <div className="flex flex-wrap items-center gap-2 text-xs font-mono tabular-nums text-slate-700">
-                          <span className="font-semibold">{t('الإيجار:', 'Rent:')} {formatNumber(bk.totalRentEgp)} {t('ج.م', 'EGP')}</span>
+                          <span className="font-semibold">
+                            {t('الإيجار الشهري:', 'Monthly Rent:')} {formatNumber(bk.monthlyRentEgp || bk.unitPriceEgp || bk.totalRentEgp)} {t('ج.م', 'EGP')}
+                          </span>
                           <span aria-hidden="true" className="text-slate-300">|</span>
                           <span className="text-blue-700 font-bold">
-                            {t('المسدد أونلاين (20% من أول شهر):', 'Online Paid (20% 1st Month):')} {formatNumber(bk.escrowAmountEgp || firstMonthPricing.onlineDueTotalEgp)} {t('ج.م', 'EGP')}
+                            {t(`المسدد أونلاين (${formatNumber(bkRatePct)}% من أول شهر):`, `Online Paid (${formatNumber(bkRatePct)}% 1st Mo):`)}{' '}
+                            {formatNumber(bk.escrowAmountEgp || firstMonthPricing.onlineDueTotalEgp)} {t('ج.م', 'EGP')}
                           </span>
                           <span aria-hidden="true" className="text-slate-300">|</span>
                           <span className="text-emerald-700 font-bold">
-                            {t('المتبقي للمالك عند الاستلام:', 'Due to Landlord:')} {formatNumber(bk.landlordNetEgp || firstMonthPricing.remainingPayableToLandlordEgp)} {t('ج.م', 'EGP')}
+                            {t('المتبقي للمالك عند الاستلام:', 'Due to Landlord:')} {formatNumber(bk.landlordNetEgp || firstMonthPricing.remainingFirstMonthEgp)} {t('ج.م', 'EGP')}
                           </span>
                         </div>
                       </div>
@@ -1294,6 +1398,90 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                           </span>
                         </button>
                       </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Real Supabase Payments & Proof Transaction History */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-blue-700" />
+                <h2 className="text-base font-bold text-slate-900">
+                  {t('سجل معاملاتي وإيصالات الدفع (Supabase)', 'My Payment Transactions & Proofs (Supabase)')}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadSupabasePayments()}
+                disabled={loadingPayments}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingPayments ? 'animate-spin' : ''}`} />
+                <span>{t('تحديث', 'Refresh')}</span>
+              </button>
+            </div>
+
+            {userPayments.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                {t(
+                  'لا توجد معاملات دفع أو طلبات تحويل مسجلة باسم حسابك في Supabase حتى الآن.',
+                  'No recorded payment transactions or transfer proofs found in Supabase yet.'
+                )}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {userPayments.map((p) => {
+                  const badge = formatPaymentStatusBadge(p);
+                  return (
+                    <div
+                      key={p.id}
+                      className="border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-mono font-bold text-slate-900 select-all">
+                            {p.referenceCode}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${badge.cls}`}>
+                            {badge.text}
+                          </span>
+                          <span className="text-slate-400">· {formatTimeAgo(p.createdAtMs)}</span>
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-900">{p.apartmentTitle}</h4>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                          <span className="font-mono font-bold text-blue-700">
+                            {p.channelMode === 'booking_request'
+                              ? t('طلب حجز مبدئي', 'Booking Request')
+                              : `${formatNumber(p.amountEgp)} ${t('ج.م (دفعة المنصة والمقدم)', 'EGP (Platform Fee & Advance)')}`}
+                          </span>
+                          <span aria-hidden="true" className="text-slate-300">|</span>
+                          <span className="font-mono text-emerald-700 font-semibold">
+                            {t('المتبقي للمالك عند المقابلة:', 'Landlord Remaining:')} {formatNumber(p.landlordRemainingEgp)} {t('ج.م', 'EGP')}
+                          </span>
+                          {p.payerReferenceNote && (
+                            <>
+                              <span aria-hidden="true" className="text-slate-300">|</span>
+                              <span className="font-mono text-slate-500">{p.payerReferenceNote}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {p.proofUrl && (
+                        <a
+                          href={p.proofUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold shrink-0"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 text-blue-700" />
+                          <span>{t('عرض إثبات التحويل', 'View Proof')}</span>
+                        </a>
+                      )}
                     </div>
                   );
                 })}
@@ -1595,7 +1783,7 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                           <h4 className="text-sm font-bold text-slate-900">{apt.title}</h4>
                           <div className="text-xs font-mono tabular-nums text-blue-700 mt-0.5">
                             {formatNumber(apt.monthlyRentEgp)} {t('ج.م / شهر', 'EGP / mo')}
-                            {apt.dailyRateEgp > 0 &&
+                            {apt.category === 'hotel_room' && apt.dailyRateEgp > 0 &&
                               ` · ${formatNumber(apt.dailyRateEgp)} ${t('ج.م / يوم', 'EGP / night')}`}
                           </div>
                         </div>
@@ -1646,7 +1834,7 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                             />
                           </div>
 
-                          {(apt.category === 'hotel_room' || apt.category === 'whole_house') &&
+                          {apt.category === 'hotel_room' &&
                             apt.billingMode === 'daily_or_monthly' && (
                               <div>
                                 <label className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -1689,26 +1877,155 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
               </div>
             )}
 
-            {myLandlordBookings.length > 0 && (
-              <div className="pt-4 border-t border-slate-100 space-y-2">
-                <h3 className="text-xs font-bold text-slate-800">
-                  {t('سجل عقود الضمان المحصلة لوحداتي', 'Settled Landlord Escrow Leases')}
-                </h3>
-                {myLandlordBookings.map((lb) => (
-                  <div
-                    key={lb.id}
-                    className="text-xs flex items-center justify-between py-2 border-b border-slate-100 last:border-0"
-                  >
-                    <span>
-                      {lb.apartmentTitle} — {lb.tenantDisplayName}
-                    </span>
-                    <span className="font-mono tabular-nums font-bold text-emerald-700">
-                      +{formatNumber(lb.landlordNetEgp)} {t('ج.م', 'EGP')}
-                    </span>
-                  </div>
-                ))}
+            {/* Real Landlord Bookings, Payments & Settlement Status (Strictly Non-Demo Supabase Records) */}
+            <div className="pt-4 border-t border-slate-200 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {t('حجوزات ومدفوعات وحداتي وحالة التسوية والاستلام', 'Unit Bookings, Payments & Handover Settlement')}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {t(
+                      'سجل فعلي من قاعدة بيانات Supabase لمدفوعات وحجوزات وحداتك الحقيقية فقط دون خلط أي بيانات تجريبية.',
+                      'Live records from Supabase for your real properties only (no mock/demo records).'
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadSupabasePayments()}
+                  disabled={loadingPayments}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingPayments ? 'animate-spin' : ''}`} />
+                  <span>{t('تحديث السجل', 'Refresh')}</span>
+                </button>
               </div>
-            )}
+
+              {/* Real Summary Counters */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                  <span className="text-[11px] text-slate-500 block">{t('إجمالي المعاملات الحقيقية', 'Real Transactions')}</span>
+                  <span className="font-mono font-extrabold text-base text-slate-900">
+                    {formatNumber(landlordPayments.length)}
+                  </span>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                  <span className="text-[11px] text-emerald-700 block">{t('مؤكدة / بانتظار المقابلة', 'Confirmed / Awaiting Meetup')}</span>
+                  <span className="font-mono font-extrabold text-base text-emerald-800">
+                    {formatNumber(landlordPayments.filter((p) => p.status === 'confirmed').length)}
+                  </span>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <span className="text-[11px] text-amber-800 block">{t('بانتظار مراجعة التحويل/الطلب', 'Pending Verification/Approval')}</span>
+                  <span className="font-mono font-extrabold text-base text-amber-900">
+                    {formatNumber(
+                      landlordPayments.filter(
+                        (p) => p.status === 'pending_verification' || p.status === 'pending_approval'
+                      ).length
+                    )}
+                  </span>
+                </div>
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                  <span className="text-[11px] text-blue-700 block">{t('تم الاستلام والتسوية', 'Settled Handovers')}</span>
+                  <span className="font-mono font-extrabold text-base text-blue-900">
+                    {formatNumber(landlordPayments.filter((p) => p.status === 'settled').length)}
+                  </span>
+                </div>
+              </div>
+
+              {landlordPayments.length === 0 && myLandlordBookings.length === 0 ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-500 text-center">
+                  {t(
+                    'لا توجد حجوزات أو معاملات دفع حقيقية مسجلة على وحداتك حتى الآن.',
+                    'No real bookings or payment transactions on your units yet.'
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {landlordPayments.map((lp) => {
+                    const badge = formatPaymentStatusBadge(lp);
+                    return (
+                      <div
+                        key={lp.id}
+                        className="border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className="font-mono font-bold text-slate-900">{lp.referenceCode}</span>
+                            <span className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${badge.cls}`}>
+                              {badge.text}
+                            </span>
+                            <span className="text-slate-400">· {formatTimeAgo(lp.createdAtMs)}</span>
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-900">
+                            {lp.apartmentTitle} — <span className="text-blue-700">{lp.userDisplayName}</span>
+                          </h4>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-slate-600">
+                            <span>
+                              {t('المستحق لك عند الاستلام:', 'Due to You on Handover:')}{' '}
+                              <strong className="text-emerald-700">{formatNumber(lp.landlordRemainingEgp)} {t('ج.م', 'EGP')}</strong>
+                            </span>
+                            <span aria-hidden="true" className="text-slate-300">|</span>
+                            <span>
+                              {t('دفعة المنصة والمقدم:', 'Platform Fee & Advance:')}{' '}
+                              <strong>{formatNumber(lp.amountEgp)} {t('ج.م', 'EGP')}</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          {lp.proofUrl && (
+                            <a
+                              href={lp.proofUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5 text-blue-700" />
+                              <span>{t('إثبات التحويل', 'View Proof')}</span>
+                            </a>
+                          )}
+                          {lp.status === 'confirmed' && (
+                            <button
+                              type="button"
+                              disabled={settlingPaymentId === lp.id}
+                              onClick={() => void handleMarkPaymentSettled(lp)}
+                              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg whitespace-nowrap"
+                            >
+                              {settlingPaymentId === lp.id
+                                ? t('جاري التسوية...', 'Settling...')
+                                : t('تأكيد المقابلة واستلام المتبقي (تسوية)', 'Confirm Handover & Settlement')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {myLandlordBookings
+                    .filter((lb) => !landlordPayments.some((lp) => lp.bookingId === lb.id))
+                    .map((lb) => (
+                      <div
+                        key={lb.id}
+                        className="border border-slate-200 rounded-xl p-3.5 text-xs flex flex-wrap items-center justify-between gap-2 bg-slate-50"
+                      >
+                        <div>
+                          <span className="font-bold text-slate-900 block">
+                            {lb.apartmentTitle} — {lb.tenantDisplayName}
+                          </span>
+                          <span className="font-mono text-slate-500">
+                            {lb.paymentReference} · {lb.status}
+                          </span>
+                        </div>
+                        <span className="font-mono tabular-nums font-bold text-emerald-700">
+                          +{formatNumber(lb.landlordNetEgp)} {t('ج.م', 'EGP')}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

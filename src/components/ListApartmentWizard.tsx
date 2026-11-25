@@ -210,8 +210,6 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
   const [showPresetTemplates, setShowPresetTemplates] = useState<boolean>(false);
 
   // Whole-House Specific Specifications (منزل كامل)
-  const [wholeHouseBillingMode, setWholeHouseBillingMode] =
-    useState<BillingMode>('monthly_only');
   const [houseApartmentsCountText, setHouseApartmentsCountText] = useState<string>('3');
   const [houseFloorsCountText, setHouseFloorsCountText] = useState<string>('3');
   const [houseHasGardenOrRoof, setHouseHasGardenOrRoof] = useState<boolean>(true);
@@ -346,9 +344,7 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
     [baseMonthlyInput, baseCurrency, liveCurrencyRates]
   );
 
-  const supportsDailyRate =
-    category === 'hotel_room' ||
-    (category === 'whole_house' && wholeHouseBillingMode === 'daily_or_monthly');
+  const supportsDailyRate = category === 'hotel_room';
 
   const computedDailyRateEgp = useMemo(() => {
     if (!supportsDailyRate) return 0;
@@ -600,11 +596,7 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
       }
 
       const billingMode: BillingMode =
-        category === 'hotel_room'
-          ? 'daily_or_monthly'
-          : category === 'whole_house'
-            ? wholeHouseBillingMode
-            : 'monthly_only';
+        category === 'hotel_room' ? 'daily_or_monthly' : 'monthly_only';
       const safeOwnerName = (
         ownerDisplayName.trim() ||
         currentUser.displayName?.trim() ||
@@ -988,18 +980,9 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                   <label className="block text-xs font-semibold text-slate-800 mb-1">
                     {t('نظام تأجير المنزل الكامل', 'Whole-House Leasing Mode')}
                   </label>
-                  <select
-                    value={wholeHouseBillingMode}
-                    onChange={(e) => setWholeHouseBillingMode(e.target.value as BillingMode)}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs sm:text-sm font-semibold text-slate-900"
-                  >
-                    <option value="monthly_only">
-                      {t('إيجار شهري / سنوي للمنزل بالكامل', 'Monthly / Annual Whole-House Lease')}
-                    </option>
-                    <option value="daily_or_monthly">
-                      {t('متاح للإيجار الشهري أو اليومي (فيلا/منزل ضيافة)', 'Monthly or Daily Stay')}
-                    </option>
-                  </select>
+                  <div className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs sm:text-sm font-semibold text-slate-800">
+                    {t('إيجار شهري / سنوي للمنزل بالكامل', 'Monthly / Annual Whole-House Lease')}
+                  </div>
                 </div>
               </div>
 
@@ -1097,19 +1080,14 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                 </div>
               </div>
 
-              {/* Hotel or Whole-House Daily Rate */}
+              {/* Hotel Daily Rate (strictly for hotel_room) */}
               {supportsDailyRate && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {category === 'whole_house'
-                      ? t(
-                          `إيجار المنزل الكامل بالليلة (${baseCurrency})`,
-                          `Whole-House Nightly Rate (${baseCurrency})`
-                        )
-                      : t(
-                          `سعر الغرفة اليومي بالليلة (${baseCurrency})`,
-                          `Daily Nightly Rate (${baseCurrency})`
-                        )}
+                    {t(
+                      `سعر الغرفة اليومي بالليلة (${baseCurrency})`,
+                      `Daily Nightly Rate (${baseCurrency})`
+                    )}
                   </label>
                   <input
                     type="text"

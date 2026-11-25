@@ -728,7 +728,7 @@ export const EgyptMapExplorer: React.FC<EgyptMapExplorerProps> = ({
 
   const getDisplayedUnitPrice = useCallback(
     (apt: ApartmentRecord) => {
-      if (priceBasis === 'daily' && apt.dailyRateEgp > 0) {
+      if (priceBasis === 'daily' && apt.category === 'hotel_room' && apt.dailyRateEgp > 0) {
         return {
           amountEgp: apt.dailyRateEgp,
           pinSuffix: lang === 'ar' ? 'ج.م / يوم' : 'EGP/d',
@@ -864,7 +864,7 @@ export const EgyptMapExplorer: React.FC<EgyptMapExplorerProps> = ({
       if (apt.houseHasPrivateGarage === true) privateGarageCount += 1;
       if (apt.houseHasGardenOrRoof === true) gardenOrRoofCount += 1;
       if (apt.hasVirtualTour) virtualTourCount += 1;
-      if (apt.billingMode === 'daily_or_monthly' && apt.dailyRateEgp > 0) {
+      if (apt.category === 'hotel_room' && apt.billingMode === 'daily_or_monthly' && apt.dailyRateEgp > 0) {
         dailyStayCount += 1;
       }
     }
@@ -896,7 +896,7 @@ export const EgyptMapExplorer: React.FC<EgyptMapExplorerProps> = ({
       }
       if (
         requireDailyBooking &&
-        !(apt.billingMode === 'daily_or_monthly' && apt.dailyRateEgp > 0)
+        !(apt.category === 'hotel_room' && apt.billingMode === 'daily_or_monthly' && apt.dailyRateEgp > 0)
       ) {
         return false;
       }
@@ -1021,7 +1021,7 @@ export const EgyptMapExplorer: React.FC<EgyptMapExplorerProps> = ({
       if (requireVirtualTour && !apt.hasVirtualTour) continue;
       if (
         requireDailyBooking &&
-        !(apt.billingMode === 'daily_or_monthly' && apt.dailyRateEgp > 0)
+        !(apt.category === 'hotel_room' && apt.billingMode === 'daily_or_monthly' && apt.dailyRateEgp > 0)
       ) {
         continue;
       }

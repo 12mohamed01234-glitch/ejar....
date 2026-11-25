@@ -249,3 +249,43 @@ CREATE POLICY "Public Upload Apartments" ON storage.objects
   FOR ALL TO anon, authenticated
   USING (bucket_id IN ('apartments', 'avatars', 'kyc-documents'))
   WITH CHECK (bucket_id IN ('apartments', 'avatars', 'kyc-documents'));
+
+-- 7. PAYMENTS / TRANSACTIONS LOG TABLE (Proof, Reference Code, & Settlement Tracking)
+CREATE TABLE IF NOT EXISTS public.payments (
+  id TEXT PRIMARY KEY,
+  reference_code TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL,
+  user_display_name TEXT NOT NULL DEFAULT '',
+  landlord_id TEXT NOT NULL DEFAULT '',
+  landlord_display_name TEXT NOT NULL DEFAULT '',
+  apartment_id TEXT NOT NULL,
+  apartment_title TEXT NOT NULL DEFAULT '',
+  booking_id TEXT,
+  amount_egp NUMERIC NOT NULL DEFAULT 0,
+  total_rent_egp NUMERIC NOT NULL DEFAULT 0,
+  landlord_remaining_egp NUMERIC NOT NULL DEFAULT 0,
+  payment_method TEXT NOT NULL DEFAULT 'instapay',
+  channel_mode TEXT NOT NULL CHECK (channel_mode IN ('paymob_live', 'manual_transfer', 'wallet_balance', 'booking_request')) DEFAULT 'manual_transfer',
+  status TEXT NOT NULL CHECK (status IN ('pending_verification', 'pending_approval', 'confirmed', 'rejected', 'settled')) DEFAULT 'pending_verification',
+  booking_status TEXT NOT NULL CHECK (booking_status IN ('pending_approval', 'pending_verification', 'escrow_paid', 'completed', 'cancelled')) DEFAULT 'pending_verification',
+  proof_url TEXT,
+  payer_reference_note TEXT,
+  is_demo BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public payments read" ON public.payments;
+DROP POLICY IF EXISTS "Public payments write" ON public.payments;
+CREATE POLICY "Public payments read" ON public.payments FOR SELECT USING (true);
+CREATE POLICY "Public payments insert" ON public.payments FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public payments update" ON public.payments FOR UPDATE USING (true) WITH CHECK (true);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.payments TO anon, authenticated;
+
+CREATE INDEX IF NOT EXISTS idx_payments_user ON public.payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_landlord ON public.payments(landlord_id);
+CREATE INDEX IF NOT EXISTS idx_payments_apt ON public.payments(apartment_id);
+CREATE INDEX IF NOT EXISTS idx_payments_ref ON public.payments(reference_code);

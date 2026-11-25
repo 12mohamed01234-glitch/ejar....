@@ -163,7 +163,10 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
         apartment.category,
         platformSettings ?? { commissionRatePct: apartment.commissionRatePct || 10 }
       );
-      const commissionAmountEgp = computeEjarEscrowPricing(baseUnitPriceEgp).onlineDueTotalEgp;
+      const commissionAmountEgp = computeEjarEscrowPricing(
+        baseUnitPriceEgp,
+        commissionRatePct
+      ).onlineDueTotalEgp;
       return {
         apartmentId: apartment.id,
         apartmentTitle: apartment.title,
@@ -415,7 +418,10 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
       logFirestoreDiagnostic(err, OperationType.GET, `apartments/${computedMeta.apartmentId}`);
     }
 
-    const commissionAmountEgp = computeEjarEscrowPricing(resolvedBasePrice).onlineDueTotalEgp;
+    const commissionAmountEgp = computeEjarEscrowPricing(
+      resolvedBasePrice,
+      computedMeta.commissionRatePct
+    ).onlineDueTotalEgp;
     const tenantDisplayName =
       (currentUser.displayName?.trim() || 'مستأجر موثق').slice(0, 80).length >= 2
         ? (currentUser.displayName?.trim() || 'مستأجر موثق').slice(0, 80)
@@ -1154,14 +1160,14 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
               <div>
                 <div className="text-slate-700 font-semibold">
                   {t(
-                    'نسبة الموقع (20% على إيجار أول شهر فقط مهما كان عدد الشهور)',
-                    'Site Fee (20% on 1st Month Only Regardless of Duration)'
+                    `نسبة الموقع (${formatNumber(computedMeta.commissionRatePct)}% من إيجار أول شهر فقط)`,
+                    `Platform Rate (${formatNumber(computedMeta.commissionRatePct)}% of 1st Month Only)`
                   )}
                 </div>
                 <div className="text-[11px] text-slate-500 mt-0.5">
                   {t(
-                    `10% عمولة + 10% مقدم يُخصم من أول شهر عند المقابلة · إيجار الشهر الأول: ${formatNumber(computedMeta.baseUnitPriceEgp)} ج.م`,
-                    `10% fee + 10% 1st-month advance deducted on handover · 1st mo: ${formatNumber(computedMeta.baseUnitPriceEgp)} EGP`
+                    `تُخصم نسبة الـ ${formatNumber(computedMeta.commissionRatePct)}% من الشهر الأول عند المقابلة · إيجار الشهر الأول: ${formatNumber(computedMeta.baseUnitPriceEgp)} ج.م`,
+                    `${formatNumber(computedMeta.commissionRatePct)}% deducted from 1st month on handover · 1st mo: ${formatNumber(computedMeta.baseUnitPriceEgp)} EGP`
                   )}
                 </div>
               </div>
