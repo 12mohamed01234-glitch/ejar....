@@ -44,6 +44,7 @@ import {
   TenantWalletRecord,
   buildLiveCurrencyRates,
   computeLandlordReputation,
+  computeEjarEscrowPricing,
   computeOneTimeCommission,
   convertFromEgp,
   formatCurrencyValue,
@@ -274,9 +275,14 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
     securityDepositEgp +
     totalMaintenanceEgp;
 
-  /* ===== جدية الحجز 10% / المتبقي 90% عند الاستلام ===== */
-  const earnestDepositEgp = Math.round(grandTotalLeaseCostEgp * 0.10);
-  const remainingOnHandoverEgp = grandTotalLeaseCostEgp - earnestDepositEgp;
+  /* ===== نظام الـ 20% الموحد لضمان المنصة =====
+   * 10% عمولة المستأجر للمنصة + 10% دفعة مقدمة تُخصم من أول شهر (عمولة المالك محصلة مقدماً للمنصة)
+   * 20% إجمالي المطلوب سداده أونلاين الآن بالضمان
+   * 90% المتبقي للمالك مباشرة عند المقابلة واستلام المفتاح والتوقيع
+   */
+  const escrowPricing = computeEjarEscrowPricing(calcUnitRateEgp);
+  const earnestDepositEgp = escrowPricing.onlineDueTotalEgp;
+  const remainingOnHandoverEgp = grandTotalLeaseCostEgp - escrowPricing.landlordCommissionEgp;
 
   const liveCurrencyRates = buildLiveCurrencyRates(platformSettings);
   const formatCalcCurrency = (amountEgp: number) =>
@@ -1433,13 +1439,13 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                   </div>
                 </div>
 
-                {/* Earnest Deposit 10% / Remaining 90% on Handover - Spec Section 5.5 */}
+                {/* Escrow Deposit 20% Online / Remaining 90% on Handover */}
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Key className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                       <span className="text-xs font-bold text-slate-900">
-                        {t('جدية الحجز 10% / المتبقي 90% عند الاستلام', 'Earnest Deposit 10% / Remaining 90% on Handover')}
+                        {t('نظام الضمان الرسمي (20% الآن / 90% للمالك عند الاستلام)', 'Platform Escrow (20% Online / 90% on Handover)')}
                       </span>
                     </div>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">
@@ -1450,7 +1456,7 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <div className="bg-white/60 p-2 rounded-lg border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">
-                        {t('إجمالي مبلغ الإيجار المعتمد', 'Total Approved Rent')}
+                        {t('إجمالي قيمة الإيجار المتفق عليه', 'Total Approved Rent')}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-slate-900 block">
                         {formatCalcCurrency(grandTotalLeaseCostEgp)}
@@ -1458,26 +1464,35 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                     </div>
 
                     <div className="bg-blue-50 p-2 rounded-lg border border-blue-200">
-                      <span className="text-[10px] text-blue-700 block">
-                        {t('10% جدية حجز (تدفع الآن أونلاين)', '10% Earnest Deposit (Pay Online Now)')}
+                      <span className="text-[10px] text-blue-700 font-bold block">
+                        {t('20% المطلوب سداده أونلاين بالضمان', '20% Paid Online Escrow')}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-blue-700 block">
                         {formatCalcCurrency(earnestDepositEgp)}
                       </span>
+                      <span className="text-[9px] text-slate-500 block mt-0.5">
+                        {t('10% عمولة المستأجر + 10% مقدم إيجار أول شهر', '10% tenant fee + 10% advance rent deduction')}
+                      </span>
                     </div>
 
                     <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
-                      <span className="text-[10px] text-emerald-700 block">
-                        {t('90% المتبقي عند استلام الشقة', '90% Remaining on Key Handover')}
+                      <span className="text-[10px] text-emerald-700 font-bold block">
+                        {t('90% المتبقي للمالك عند الاستلام', '90% Remaining on Key Handover')}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-emerald-700 block">
                         {formatCalcCurrency(remainingOnHandoverEgp)}
                       </span>
+                      <span className="text-[9px] text-slate-500 block mt-0.5">
+                        {t('بعد خصم الـ 10% المقدمة التي دفعها المستأجر', '10% advance deducted from 1st month')}
+                      </span>
                     </div>
 
                     <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 sm:col-span-2">
-                      <span className="text-[10px] text-slate-500 block">
-                        {t('يتم دفع الـ 90% للمالك مباشرة عند استلام الوحدة ومطابقة المواصفات والعقد، ويتم فك قفل العنوان التفصيلي ورقم العمارة وهاتف المالك فور دفع جدية الحجز.', 'The 90% is paid to the landlord directly upon key handover and unit inspection. Exact address, building number, and landlord phone are unlocked immediately after paying the earnest deposit.')}
+                      <span className="text-[10px] text-slate-600 block leading-relaxed">
+                        {t(
+                          'يضمن الموقع حق الطرفين بتحصيل 20% أونلاين فقط (10% عمولة المستأجر + 10% دفعة مقدمة تُخصم من إيجار الشهر الأول)، ويتم فك قفل العنوان التفصيلي ورقم المالك فور السداد. وعند استلام الشقة يدفع المستأجر للمالك الـ 90% المتبقية فقط.',
+                          'The platform secures both parties by charging 20% online (10% tenant fee + 10% 1st month advance). Address and phone unlock instantly. Upon handover, tenant pays only 90% directly to the landlord.'
+                        )}
                       </span>
                     </div>
                   </div>

@@ -41,6 +41,7 @@ import {
   buildChatThreadId,
   buildLiveCurrencyRates,
   buildNotificationId,
+  computeEjarEscrowPricing,
   computeOneTimeCommission,
   computeTextSha256,
   convertFromEgp,
@@ -207,11 +208,19 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
   );
   const safeUnitsCount = Math.max(1, Math.min(365, Math.round(unitsCount || 1)));
   const totalRentEgp = unitPriceEgp * safeUnitsCount;
-  const platformCommissionEgp = computeOneTimeCommission(
-    unitPriceEgp,
-    effectiveCommissionRatePct
-  );
-  const landlordNetEgp = totalRentEgp - platformCommissionEgp;
+
+  /* ===== نظام الـ 20% الموحد لضمان المنصة =====
+   * المستأجر يسدد 20% أونلاين بالضمان:
+   *  - 10% عمولة المستأجر الرسمية للمنصة
+   *  - 10% دفعة مقدمة من إيجار الشهر الأول (عمولة المالك محصلة مقدماً للمنصة وتخصم عند مقابلة المالك)
+   * المتبقي للمالك عند المقابلة واستلام المفتاح والتوقيع:
+   *  - 90% فقط من الإيجار (خصم الـ 10% المدفوعة مقدماً)
+   */
+  const escrowPricing = computeEjarEscrowPricing(unitPriceEgp);
+  const onlineDueTotalEgp = escrowPricing.onlineDueTotalEgp;
+  const remainingOnHandoverEgp = totalRentEgp - escrowPricing.landlordCommissionEgp;
+  const platformCommissionEgp = escrowPricing.onlineDueTotalEgp;
+  const landlordNetEgp = remainingOnHandoverEgp;
 
   const isAdmin = isPlatformAdminEmail(currentUser?.email);
   const isBanned = Boolean(banRecord && !isAdmin);
@@ -224,17 +233,17 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
 
   const exchangeRateToEgp = liveCurrencyRates[paymentCurrency] || 1;
   const paidAmountInCurrency = convertFromEgp(
-    totalRentEgp,
+    onlineDueTotalEgp,
     paymentCurrency,
     liveCurrencyRates
   );
   const commissionInCurrency = convertFromEgp(
-    platformCommissionEgp,
+    escrowPricing.tenantCommissionEgp,
     paymentCurrency,
     liveCurrencyRates
   );
   const landlordNetInCurrency = convertFromEgp(
-    landlordNetEgp,
+    remainingOnHandoverEgp,
     paymentCurrency,
     liveCurrencyRates
   );
@@ -243,9 +252,7 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
       ? Math.round((platformCommissionEgp * tenantDiscountPct) / 100)
       : 0;
 
-  /* ===== جدية الحجز 10% / المتبقي 90% عند الاستلام ===== */
-  const earnestDepositEgp = Math.round(totalRentEgp * 0.10);
-  const remainingOnHandoverEgp = totalRentEgp - earnestDepositEgp;
+  const earnestDepositEgp = onlineDueTotalEgp;
 
   const durationSummaryLabel =
     rentalUnit === 'day'
@@ -793,12 +800,12 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
         paymentReference,
         status: 'escrow_paid',
         createdAtMs: Date.now(),
-        escrowAmountEgp: platformCommissionEgp,
-        commissionAmountEgp: platformCommissionEgp,
+        escrowAmountEgp: onlineDueTotalEgp,
+        commissionAmountEgp: onlineDueTotalEgp,
       });
 
       if (paymentMethod === 'wallet_balance' && onDeductWallet) {
-        await onDeductWallet(totalRentEgp, apartment.id, apartment.title);
+        await onDeductWallet(onlineDueTotalEgp, apartment.id, apartment.title);
       }
 
       onApartmentRentedAndDeleted(apartment.id);
@@ -807,9 +814,9 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
         bookingId,
         apartmentTitle: apartment.title,
         reference: paymentReference,
-        totalEgp: totalRentEgp,
-        commissionEgp: platformCommissionEgp,
-        landlordNetEgp,
+        totalEgp: onlineDueTotalEgp,
+        commissionEgp: escrowPricing.tenantCommissionEgp,
+        landlordNetEgp: remainingOnHandoverEgp,
         paymentCurrency,
         paidAmountInCurrency,
         exchangeRateToEgp,
@@ -1242,36 +1249,45 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
                   </div>
                 )}
 
-                {/* Earnest Deposit 10% / Remaining 90% */}
+                {/* Escrow Deposit 20% Online / Remaining 90% on Handover */}
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 space-y-1.5 mt-1.5">
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <span className="font-bold text-emerald-900">
-                      {t('جدية الحجز 10% / المتبقي 90% عند الاستلام', 'Earnest Deposit 10% / Remaining 90% on Handover')}
+                      {t('نظام الضمان الرسمي (20% الآن / 90% للمالك عند الاستلام)', 'Platform Escrow (20% Online / 90% on Handover)')}
                     </span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">
                       {t('إلزامي', 'Required')}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-blue-50 p-1.5 rounded border border-blue-200">
-                      <span className="text-[10px] text-blue-700 block">
-                        {t('10% تُدفع الآن أونلاين', '10% Paid Online Now')}
+                    <div className="bg-blue-50 p-2 rounded-lg border border-blue-200">
+                      <span className="text-[10px] text-blue-700 font-semibold block">
+                        {t('20% المطلوبة الآن أونلاين بالضمان', '20% Paid Online Now')}
                       </span>
-                      <span className="font-mono tabular-nums font-bold text-blue-700 block">
-                        {formatCurrencyValue(convertFromEgp(earnestDepositEgp, paymentCurrency, liveCurrencyRates), paymentCurrency, lang)}
+                      <span className="font-mono tabular-nums font-bold text-blue-700 block text-sm">
+                        {formatCurrencyValue(convertFromEgp(onlineDueTotalEgp, paymentCurrency, liveCurrencyRates), paymentCurrency, lang)}
+                      </span>
+                      <span className="text-[9px] text-slate-500 block mt-0.5">
+                        {t('10% عمولة المستأجر + 10% دفعة مقدمة تُخصم من أول شهر', '10% tenant fee + 10% 1st month rent deduction')}
                       </span>
                     </div>
-                    <div className="bg-emerald-50 p-1.5 rounded border border-emerald-200">
-                      <span className="text-[10px] text-emerald-700 block">
-                        {t('90% عند استلام الوحدة', '90% on Unit Handover')}
+                    <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                      <span className="text-[10px] text-emerald-700 font-semibold block">
+                        {t('90% للمالك مباشرة عند المقابلة', '90% to Landlord on Handover')}
                       </span>
-                      <span className="font-mono tabular-nums font-bold text-emerald-700 block">
+                      <span className="font-mono tabular-nums font-bold text-emerald-700 block text-sm">
                         {formatCurrencyValue(convertFromEgp(remainingOnHandoverEgp, paymentCurrency, liveCurrencyRates), paymentCurrency, lang)}
+                      </span>
+                      <span className="text-[9px] text-slate-500 block mt-0.5">
+                        {t('بعد خصم الـ 10% المقدمة التي دفعها المستأجر للمنصة', '10% advance deducted from landlord first month')}
                       </span>
                     </div>
                   </div>
-                  <div className="text-[10px] text-slate-500 italic">
-                    {t('يتم دفع الـ 90% للمالك مباشرة عند استلام الوحدة ومطابقة المواصفات.', 'The 90% is paid to the landlord directly upon key handover and unit inspection.')}
+                  <div className="text-[10px] text-slate-600 bg-white/70 p-2 rounded border border-slate-200 leading-relaxed">
+                    {t(
+                      'يدفع المستأجر 20% فقط أونلاين لحفظ حق الطرفين وعمولة الموقع، وعند المقابلة واستلام المفتاح ومطابقة الشقة يدفع للمالك 90% فقط من الإيجار بعد خصم الـ 10% المقدمة.',
+                      'Tenant pays 20% online (10% platform fee + 10% advance rent deduction). Upon key handover, tenant pays only 90% of rent directly to landlord.'
+                    )}
                   </div>
                 </div>
               </div>
@@ -1323,15 +1339,15 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
                       <span>{t('الرصيد المتاح في محفظتك لجدية الحجز:', 'Available Wallet Deposit Balance:')}</span>
                       <span className="font-mono text-sm">{formatEgp(tenantWallet?.balanceEgp ?? 0)}</span>
                     </div>
-                    {(tenantWallet?.balanceEgp ?? 0) >= totalRentEgp ? (
+                    {(tenantWallet?.balanceEgp ?? 0) >= onlineDueTotalEgp ? (
                       <p className="text-emerald-700 font-semibold">
-                        {t('رصيدك يغطي المبلغ المطلوب بالكامل. سيتم الخصم وتأكيد الحجز وتفعيل العقد فوراً.', 'Balance covers full amount. Booking will be confirmed immediately.')}
+                        {t('رصيدك يغطي مبلغ الحجز والضمان المطلوب بالكامل (20%). سيتم الخصم وتأكيد الحجز وتفعيل العقد فوراً.', 'Balance covers full 20% online escrow amount. Booking will be confirmed immediately.')}
                       </p>
                     ) : (
                       <p className="text-amber-800">
                         {t(
-                          `الرصيد المتاح يغطي جزءاً من الحجز. يمكنك شحن الرصيد المتبقي (${formatEgp(totalRentEgp - (tenantWallet?.balanceEgp ?? 0))}) من المحفظة أو الدفع ببطاقة بنكية / إنستاباي.`,
-                          `Partial balance available. Top up remaining balance or pay via card/InstaPay.`
+                          `الرصيد المتاح يغطي جزءاً من الحجز. يمكنك شحن الرصيد المتبقي (${formatEgp(onlineDueTotalEgp - (tenantWallet?.balanceEgp ?? 0))}) في المحفظة أو الدفع ببطاقة بنكية / إنستاباي.`,
+                          `Partial balance available. Top up remaining balance (${formatEgp(onlineDueTotalEgp - (tenantWallet?.balanceEgp ?? 0))}) or pay via card/InstaPay.`
                         )}
                       </p>
                     )}
@@ -1341,7 +1357,7 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
                 {paymentMethod !== 'wallet_balance' && (
                   <PaymobGatewayBox
                     purpose="booking"
-                    amountEgp={Math.round(totalRentEgp)}
+                    amountEgp={Math.round(onlineDueTotalEgp)}
                     selectedMethod={paymentMethod as GatewayPaymentMethod}
                     onSelectMethod={(m) => setPaymentMethod(m)}
                     userId={currentUser?.uid}

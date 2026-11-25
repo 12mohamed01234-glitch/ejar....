@@ -1213,21 +1213,16 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                           </span>
                         </div>
                         <h4 className="text-sm font-bold text-slate-900">{bk.apartmentTitle}</h4>
-                        <div className="text-xs font-mono tabular-nums text-slate-700">
-                          {formatNumber(bk.totalRentEgp)} {t('ج.م', 'EGP')}
-                          {bk.paymentCurrency &&
-                            bk.paymentCurrency !== 'EGP' &&
-                            bk.paidAmountInCurrency && (
-                              <span className="text-blue-700 ms-2">
-                                (
-                                {formatCurrencyValue(
-                                  bk.paidAmountInCurrency,
-                                  bk.paymentCurrency,
-                                  lang
-                                )}
-                                )
-                              </span>
-                            )}
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-mono tabular-nums text-slate-700">
+                          <span className="font-semibold">{t('الإيجار:', 'Rent:')} {formatNumber(bk.totalRentEgp)} {t('ج.م', 'EGP')}</span>
+                          <span aria-hidden="true" className="text-slate-300">|</span>
+                          <span className="text-blue-700 font-bold">
+                            {t('المسدد أونلاين (20% بالضمان):', 'Online Paid (20% Escrow):')} {formatNumber(bk.escrowAmountEgp || Math.round(bk.totalRentEgp * 0.20))} {t('ج.م', 'EGP')}
+                          </span>
+                          <span aria-hidden="true" className="text-slate-300">|</span>
+                          <span className="text-emerald-700 font-bold">
+                            {t('المتبقي للمالك عند الاستلام (90%):', 'Due to Landlord (90%):')} {formatNumber(bk.landlordNetEgp || Math.round(bk.totalRentEgp * 0.90))} {t('ج.م', 'EGP')}
+                          </span>
                         </div>
                       </div>
 

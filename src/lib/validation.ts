@@ -1277,6 +1277,42 @@ export function normalizeApartmentRecord(
   };
 }
 
+export interface EjarEscrowPricingStructure {
+  monthlyRentEgp: number; // 100% of rent
+  tenantCommissionRatePct: number; // 10%
+  tenantCommissionEgp: number; // 10%
+  landlordCommissionRatePct: number; // 10%
+  landlordCommissionEgp: number; // 10%
+  onlineDueTotalEgp: number; // 20% (10% tenant fee + 10% advance from 1st month rent)
+  remainingPayableToLandlordEgp: number; // 90% of 1st month rent upon handover
+  totalLeaseCommitmentEgp: number; // 110% (100% rent + 10% tenant commission)
+}
+
+/**
+ * Standardized 20% upfront escrow formula across the entire site:
+ * - 10% Tenant platform brokerage fee
+ * - 10% Landlord fee paid upfront from first month's rent
+ * - Remaining 90% paid directly to landlord upon meetup and key handover (10% deducted)
+ */
+export function computeEjarEscrowPricing(rentEgp: number): EjarEscrowPricingStructure {
+  const safeRent = Math.max(0, Math.round(rentEgp || 0));
+  const tenantFee = Math.round(safeRent * 0.10);
+  const landlordFee = Math.round(safeRent * 0.10);
+  const onlineDue = tenantFee + landlordFee; // exactly 20%
+  const remainingHandover = Math.max(0, safeRent - landlordFee); // exactly 90%
+  const totalCommitment = safeRent + tenantFee; // 110%
+  return {
+    monthlyRentEgp: safeRent,
+    tenantCommissionRatePct: 10,
+    tenantCommissionEgp: tenantFee,
+    landlordCommissionRatePct: 10,
+    landlordCommissionEgp: landlordFee,
+    onlineDueTotalEgp: onlineDue,
+    remainingPayableToLandlordEgp: remainingHandover,
+    totalLeaseCommitmentEgp: totalCommitment,
+  };
+}
+
 /**
  * Computes the One-Time Brokerage Commission ("عمولة مرة واحدة زي السمسار")
  * using exact integer division matching Firestore CEL: (unitPriceEgp * commissionRatePct) / 100
