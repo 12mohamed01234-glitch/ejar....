@@ -23,7 +23,7 @@ import {
   db,
   logFirestoreDiagnostic,
   OperationType,
-  PLATFORM_ADMIN_EMAIL,
+  isPlatformAdminEmail,
 } from '../lib/firebase';
 import {
   ApartmentRecord,
@@ -213,7 +213,7 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
   );
   const landlordNetEgp = totalRentEgp - platformCommissionEgp;
 
-  const isAdmin = Boolean(currentUser?.email === PLATFORM_ADMIN_EMAIL);
+  const isAdmin = isPlatformAdminEmail(currentUser?.email);
   const isBanned = Boolean(banRecord && !isAdmin);
   const isBookingsPaused = Boolean(
     platformSettings && !platformSettings.allowNewBookings && !isAdmin
@@ -506,7 +506,7 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
         ? String(aptSnap.data().ownerId || apartment.ownerId)
         : apartment.ownerId;
 
-      if (!aptSnap.exists() && currentUser.email === PLATFORM_ADMIN_EMAIL) {
+      if (!aptSnap.exists() && isPlatformAdminEmail(currentUser.email)) {
         targetLandlordId = currentUser.uid;
         const seedBatch = writeBatch(db);
         const seedHash = await computeTextSha256(apartment.id);

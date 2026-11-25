@@ -55,23 +55,33 @@ export default async function handler(
       ''
     ).trim();
 
+    if (!timingSafeMatch(email, adminEmail)) {
+      return sendJson(res, 200, {
+        ok: false,
+        isAdminEmail: false,
+      });
+    }
+
     if (!adminPassword) {
       return sendJson(res, 503, {
         ok: false,
+        isAdminEmail: true,
         unconfigured: true,
         error: 'كلمة مرور الأدمن غير مضافة في متغيرات البيئة على Vercel (PLATFORM_ADMIN_PASSWORD).',
       });
     }
 
-    if (!timingSafeMatch(email, adminEmail) || !timingSafeMatch(password, adminPassword)) {
+    if (!timingSafeMatch(password, adminPassword)) {
       return sendJson(res, 401, {
         ok: false,
+        isAdminEmail: true,
         error: '⛔ بيانات دخول مالك المنصة غير صحيحة!',
       });
     }
 
     return sendJson(res, 200, {
       ok: true,
+      isAdminEmail: true,
       email: adminEmail,
     });
   } catch {

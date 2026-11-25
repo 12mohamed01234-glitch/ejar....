@@ -37,7 +37,7 @@ import {
   db,
   logFirestoreDiagnostic,
   OperationType,
-  PLATFORM_ADMIN_EMAIL,
+  isPlatformAdminEmail,
 } from '../lib/firebase';
 import {
   ApartmentRecord,
@@ -139,7 +139,7 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
     return '';
   }, [initialThread?.id, currentUser, activeApartmentId]);
 
-  const isAdmin = Boolean(currentUser?.email === PLATFORM_ADMIN_EMAIL);
+  const isAdmin = isPlatformAdminEmail(currentUser?.email);
   const isBanned = Boolean(banRecord && !isAdmin);
 
   const computedMeta = useMemo(() => {

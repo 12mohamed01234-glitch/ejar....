@@ -40,6 +40,7 @@ import {
   PLATFORM_ADMIN_EMAIL,
   PLATFORM_ADMIN_INFO,
   isPlatformAdminEmail,
+  setVerifiedAdminSessionEmail,
 } from '../lib/firebase';
 import { supabase, upsertSupabaseProfile, getSupabaseProfile, getSupabaseProfileByEmail } from '../lib/supabase';
 
@@ -298,32 +299,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      if (isAdminAccount) {
-        // Verify admin securely on server (/api/auth/admin-login) OR Supabase Auth — zero client-side password!
-        let serverVerified = false;
-        try {
-          const resp = await fetch('/api/auth/admin-login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: trimmedEmail, password }),
-          });
-          if (resp.ok) {
-            const j = (await resp.json()) as { ok?: boolean };
-            if (j.ok) serverVerified = true;
-          } else if (resp.status === 401) {
-            setErrorMsg(
-              t(
-                '⛔ كلمة المرور غير صحيحة لحساب مالك المنصة! لا يمكن الدخول إلا بكلمة المرور الرسمية المعتمدة.',
-                '⛔ Incorrect password for platform owner account! Access is strictly protected.'
-              )
-            );
-            return;
-          }
-        } catch {
-          // Fall through to Supabase Auth check
+      // Always check server-side /api/auth/admin-login first so PLATFORM_ADMIN_EMAIL works even without VITE_ prefix
+      let serverAdminVerified = false;
+      let serverSaysIsAdmin = isAdminAccount;
+      try {
+        const resp = await fetch('/api/auth/admin-login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: trimmedEmail, password }),
+        });
+        const j = (await resp.json().catch(() => ({}))) as {
+          ok?: boolean;
+          isAdminEmail?: boolean;
+          error?: string;
+        };
+        if (typeof j.isAdminEmail === 'boolean') {
+          serverSaysIsAdmin = j.isAdminEmail;
         }
+        if (resp.ok && j.ok) {
+          serverAdminVerified = true;
+        } else if (resp.status === 401 && serverSaysIsAdmin) {
+          setErrorMsg(
+            t(
+              '⛔ كلمة المرور غير صحيحة لحساب مالك المنصة! لا يمكن الدخول إلا بكلمة المرور الرسمية المعتمدة.',
+              '⛔ Incorrect password for platform owner account! Access is strictly protected.'
+            )
+          );
+          return;
+        } else if (resp.status === 503 && serverSaysIsAdmin) {
+          setErrorMsg(
+            j.error ||
+              t(
+                '⛔ لم يتم ضبط PLATFORM_ADMIN_PASSWORD في إعدادات Vercel.',
+                '⛔ PLATFORM_ADMIN_PASSWORD is not configured on Vercel.'
+              )
+          );
+          return;
+        }
+      } catch {
+        // Network / local dev fallback to Supabase Auth check below
+      }
 
-        if (!serverVerified) {
+      if (serverSaysIsAdmin) {
+        if (!serverAdminVerified) {
           const { error: sbAdminErr } = await supabase.auth.signInWithPassword({
             email: trimmedEmail,
             password,
@@ -357,6 +375,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           localStorage.setItem('ejar_phone_verified', 'true');
           localStorage.setItem('ejar_liveness_verified', 'true');
         } catch {}
+        setVerifiedAdminSessionEmail(trimmedEmail);
 
         await upsertSupabaseProfile(adminUserData);
         onSuccess(adminUserData);
@@ -461,7 +480,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         redirectTo: window.location.origin,
       });
       if (error) {
-        setErrorMsg(error.message);
+        const msgLower = error.message.toLowerCase();
+        if (msgLower.includes('rate limit') || msgLower.includes('security purposes') || msgLower.includes('after')) {
+          setErrorMsg(
+            t(
+              'تم تجاوز الحد المؤقت لإرسال رسائل البريد من Supabase. يرجى الانتظار دقيقة ثم المحاولة مجدداً (أو التحقق من إعدادات SMTP في Supabase).',
+              'Email rate limit reached on Supabase. Please wait a minute and try again.'
+            )
+          );
+        } else if (msgLower.includes('not found') || msgLower.includes('invalid')) {
+          setErrorMsg(
+            t(
+              'هذا البريد غير مسجل بكلمة مرور في Supabase (إذا كنت تدخل بحساب الأدمن فكلمة المرور تُدار من Vercel، أو استخدم الدخول بجوجل).',
+              'This email is not registered with a password in Supabase.'
+            )
+          );
+        } else {
+          setErrorMsg(
+            t(
+              `تعذر إرسال رابط الاستعادة: ${error.message}`,
+              `Could not send reset email: ${error.message}`
+            )
+          );
+        }
       } else {
         setInfoMsg(
           t(

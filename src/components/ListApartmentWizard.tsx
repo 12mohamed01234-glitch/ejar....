@@ -21,7 +21,7 @@ import {
   db,
   logFirestoreDiagnostic,
   OperationType,
-  PLATFORM_ADMIN_EMAIL,
+  isPlatformAdminEmail,
 } from '../lib/firebase';
 import { uploadSupabaseFile } from '../lib/supabase';
 import {
@@ -96,7 +96,7 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
     currencyLabel,
   } = useI18n();
 
-  const isAdmin = Boolean(currentUser?.email === PLATFORM_ADMIN_EMAIL);
+  const isAdmin = isPlatformAdminEmail(currentUser?.email);
   const liveCurrencyRates = useMemo(
     () => buildLiveCurrencyRates(platformSettings),
     [platformSettings]
@@ -588,7 +588,7 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
       );
 
       const verificationStatus =
-        currentUser.email === PLATFORM_ADMIN_EMAIL ||
+        isPlatformAdminEmail(currentUser.email) ||
         commissionPaidConfirmed ||
         oneTimeCommissionSample <= 0
           ? 'verified'

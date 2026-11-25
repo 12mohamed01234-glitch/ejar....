@@ -68,10 +68,33 @@ export const PLATFORM_ADMIN_INFO = {
   role: 'landlord' as const,
 };
 
+export function setVerifiedAdminSessionEmail(email: string | null): void {
+  try {
+    if (email) {
+      localStorage.setItem('ejar_verified_admin_email', email.trim().toLowerCase());
+    } else {
+      localStorage.removeItem('ejar_verified_admin_email');
+    }
+  } catch {}
+}
+
 export function isPlatformAdminEmail(email?: string | null): boolean {
   if (!email) return false;
   const normalized = email.trim().toLowerCase();
-  return normalized === PLATFORM_ADMIN_EMAIL.toLowerCase();
+  if (normalized === PLATFORM_ADMIN_EMAIL.toLowerCase()) return true;
+  try {
+    const verified = localStorage.getItem('ejar_verified_admin_email');
+    if (verified && normalized === verified.trim().toLowerCase()) {
+      const rawCustom = localStorage.getItem('ejar_custom_user');
+      if (rawCustom) {
+        const parsed = JSON.parse(rawCustom) as { uid?: string; email?: string };
+        if (parsed?.uid === 'admin_owner_01' && parsed?.email?.trim().toLowerCase() === normalized) {
+          return true;
+        }
+      }
+    }
+  } catch {}
+  return false;
 }
 
 export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
