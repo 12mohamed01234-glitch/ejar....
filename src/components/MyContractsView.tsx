@@ -45,6 +45,7 @@ import {
   buildBookingDemandSignalWritePayload,
   buildLiveCurrencyRates,
   buildNotificationId,
+  computeEjarEscrowPricing,
   computeFileSha256,
   computeTextSha256,
   convertFromEgp,
@@ -1238,6 +1239,10 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                   const hasReview = allReviews.some(
                     (r) => r.bookingId === bk.id && r.tenantId === currentUser.uid
                   );
+                  const firstMonthPricing = computeEjarEscrowPricing(
+                    bk.unitPriceEgp || bk.monthlyRentEgp || bk.totalRentEgp,
+                    bk.totalRentEgp
+                  );
                   return (
                     <div
                       key={bk.id}
@@ -1257,11 +1262,11 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
                           <span className="font-semibold">{t('الإيجار:', 'Rent:')} {formatNumber(bk.totalRentEgp)} {t('ج.م', 'EGP')}</span>
                           <span aria-hidden="true" className="text-slate-300">|</span>
                           <span className="text-blue-700 font-bold">
-                            {t('المسدد أونلاين (20% بالضمان):', 'Online Paid (20% Escrow):')} {formatNumber(bk.escrowAmountEgp || Math.round(bk.totalRentEgp * 0.20))} {t('ج.م', 'EGP')}
+                            {t('المسدد أونلاين (20% من أول شهر):', 'Online Paid (20% 1st Month):')} {formatNumber(bk.escrowAmountEgp || firstMonthPricing.onlineDueTotalEgp)} {t('ج.م', 'EGP')}
                           </span>
                           <span aria-hidden="true" className="text-slate-300">|</span>
                           <span className="text-emerald-700 font-bold">
-                            {t('المتبقي للمالك عند الاستلام (90%):', 'Due to Landlord (90%):')} {formatNumber(bk.landlordNetEgp || Math.round(bk.totalRentEgp * 0.90))} {t('ج.م', 'EGP')}
+                            {t('المتبقي للمالك عند الاستلام:', 'Due to Landlord:')} {formatNumber(bk.landlordNetEgp || firstMonthPricing.remainingPayableToLandlordEgp)} {t('ج.م', 'EGP')}
                           </span>
                         </div>
                       </div>

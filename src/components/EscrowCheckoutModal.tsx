@@ -180,16 +180,16 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
   const safeUnitsCount = Math.max(1, Math.min(365, Math.round(unitsCount || 1)));
   const totalRentEgp = unitPriceEgp * safeUnitsCount;
 
-  /* ===== نظام الـ 20% الموحد لضمان المنصة =====
-   * المستأجر يسدد 20% أونلاين بالضمان:
-   *  - 10% عمولة المستأجر الرسمية للمنصة
-   *  - 10% دفعة مقدمة من إيجار الشهر الأول (عمولة المالك محصلة مقدماً للمنصة وتخصم عند مقابلة المالك)
-   * المتبقي للمالك عند المقابلة واستلام المفتاح والتوقيع:
-   *  - 90% فقط من الإيجار (خصم الـ 10% المدفوعة مقدماً)
+  /* ===== نظام الـ 20% الموحد على أول شهر فقط أياً كان عدد الشهور =====
+   * المستأجر يسدد 20% من أول شهر فقط أونلاين:
+   *  - 10% عمولة المستأجر للمنصة (على أول شهر فقط)
+   *  - 10% دفعة مقدمة من إيجار الشهر الأول (تخصم عند مقابلة المالك)
+   * المتبقي للمالك عند المقابلة والاستلام:
+   *  - 90% من الشهر الأول + باقي الشهور كاملة بدون أي نسبة إضافية
    */
-  const escrowPricing = computeEjarEscrowPricing(unitPriceEgp);
+  const escrowPricing = computeEjarEscrowPricing(unitPriceEgp, totalRentEgp);
   const onlineDueTotalEgp = escrowPricing.onlineDueTotalEgp;
-  const remainingOnHandoverEgp = totalRentEgp - escrowPricing.landlordCommissionEgp;
+  const remainingOnHandoverEgp = escrowPricing.remainingPayableToLandlordEgp;
   const platformCommissionEgp = escrowPricing.onlineDueTotalEgp;
   const landlordNetEgp = remainingOnHandoverEgp;
 
@@ -768,7 +768,7 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
               </div>
               <div className="flex justify-between pt-2 border-t border-slate-100">
                 <span className="text-slate-600 font-semibold">
-                  {t('المسدد أونلاين الآن (20%)', 'Paid Online Now (20%)')}
+                  {t('المسدد أونلاين الآن (20% من أول شهر فقط)', 'Paid Online Now (20% of 1st Month Only)')}
                 </span>
                 <span className="font-mono tabular-nums font-bold text-blue-700">
                   {formatNumber(receiptData.totalEgp)} {t('ج.م', 'EGP')}
@@ -776,7 +776,7 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">
-                  {t('المتبقي للمالك عند المقابلة والاستلام (90%)', 'Due to Landlord on Handover (90%)')}
+                  {t('المتبقي للمالك عند المقابلة والاستلام', 'Due to Landlord on Handover')}
                 </span>
                 <span className="font-mono tabular-nums font-semibold text-emerald-700">
                   {formatNumber(receiptData.landlordNetEgp)} {t('ج.م', 'EGP')}
@@ -923,18 +923,41 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
             <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2.5 text-xs shadow-2xs">
               <div className="flex items-center justify-between text-slate-600">
                 <span>
-                  {t('قيمة الإيجار الكلية', 'Total Rent')} ({durationSummaryLabel})
+                  {rentalUnit === 'day'
+                    ? t('قيمة الليلة الأولى (أساس احتساب النسبة)', 'First Night Rate (Commission Basis)')
+                    : t('إيجار الشهر الأول (أساس احتساب النسبة)', 'First Month Rent (Commission Basis)')}
                 </span>
                 <span className="font-mono font-bold text-slate-900">
-                  {formatNumber(totalRentEgp)} {t('ج.م', 'EGP')}
+                  {formatNumber(unitPriceEgp)} {t('ج.م', 'EGP')}
                 </span>
               </div>
 
+              {safeUnitsCount > 1 && (
+                <div className="flex items-center justify-between text-slate-500">
+                  <span>
+                    {t('إجمالي الإيجار لكامل المدة', 'Total Rent for Duration')} ({durationSummaryLabel})
+                  </span>
+                  <span className="font-mono font-semibold text-slate-700">
+                    {formatNumber(totalRentEgp)} {t('ج.م', 'EGP')}
+                  </span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between text-slate-600">
-                <span>
-                  {t('المتبقي للمالك عند المقابلة والاستلام', 'Due to Landlord on Handover')}
-                </span>
-                <span className="font-mono font-bold text-emerald-700">
+                <div>
+                  <span>
+                    {t('المتبقي للمالك عند المقابلة والاستلام', 'Due to Landlord on Handover')}
+                  </span>
+                  <span className="block text-[10px] text-slate-400">
+                    {safeUnitsCount > 1
+                      ? t(
+                          `90% من أول شهر (${formatNumber(escrowPricing.remainingFirstMonthEgp)} ج.م) + باقي الشهور بدون عمولة`,
+                          `90% of 1st month + remaining months (0% extra fee)`
+                        )
+                      : t('90% بعد خصم الـ 10% المقدمة', '90% after 10% advance deduction')}
+                  </span>
+                </div>
+                <span className="font-mono font-bold text-emerald-700 shrink-0">
                   {formatNumber(remainingOnHandoverEgp)} {t('ج.م', 'EGP')}
                 </span>
               </div>
@@ -942,12 +965,12 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
               <div className="flex items-center justify-between pt-2.5 border-t border-slate-100">
                 <div>
                   <span className="text-sm font-bold text-slate-900 block">
-                    {t('المطلوب دفعه الآن أونلاين (20%)', 'Due Online Now (20%)')}
+                    {t('المطلوب دفعه الآن أونلاين (20% من أول شهر فقط)', 'Due Online Now (20% of 1st Month Only)')}
                   </span>
                   <span className="text-[11px] text-slate-500">
                     {t(
-                      '10% عمولة المنصة + 10% مقدم إيجار يُخصم من أول شهر عند مقابلة المالك',
-                      '10% platform fee + 10% advance deducted from 1st month on handover'
+                      '10% عمولة المنصة + 10% مقدم من الشهر الأول — ثابتة أياً كان عدد الشهور',
+                      '10% platform fee + 10% 1st month advance — fixed regardless of months count'
                     )}
                   </span>
                 </div>

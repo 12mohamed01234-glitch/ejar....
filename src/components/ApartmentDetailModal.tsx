@@ -275,14 +275,14 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
     securityDepositEgp +
     totalMaintenanceEgp;
 
-  /* ===== نظام الـ 20% الموحد لضمان المنصة =====
+  /* ===== نظام الـ 20% الموحد على أول شهر فقط أياً كان عدد الشهور =====
    * 10% عمولة المستأجر للمنصة + 10% دفعة مقدمة تُخصم من أول شهر (عمولة المالك محصلة مقدماً للمنصة)
-   * 20% إجمالي المطلوب سداده أونلاين الآن بالضمان
-   * 90% المتبقي للمالك مباشرة عند المقابلة واستلام المفتاح والتوقيع
+   * 20% إجمالي المطلوب سداده أونلاين الآن (على إيجار الشهر الأول فقط مهما كان عدد الشهور)
+   * المتبقي للمالك عند الاستلام: 90% من أول شهر + باقي الشهور كاملة بدون أي عمولة
    */
-  const escrowPricing = computeEjarEscrowPricing(calcUnitRateEgp);
+  const escrowPricing = computeEjarEscrowPricing(calcUnitRateEgp, rentSubtotalEgp);
   const earnestDepositEgp = escrowPricing.onlineDueTotalEgp;
-  const remainingOnHandoverEgp = grandTotalLeaseCostEgp - escrowPricing.landlordCommissionEgp;
+  const remainingOnHandoverEgp = escrowPricing.remainingPayableToLandlordEgp;
 
   const liveCurrencyRates = buildLiveCurrencyRates(platformSettings);
   const formatCalcCurrency = (amountEgp: number) =>
@@ -1456,42 +1456,42 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <div className="bg-white/60 p-2 rounded-lg border border-slate-200">
                       <span className="text-[10px] text-slate-500 block">
-                        {t('إجمالي قيمة الإيجار المتفق عليه', 'Total Approved Rent')}
+                        {t('إيجار الشهر الأول (أساس النسبة)', 'First Month Rent (Fee Basis)')}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-slate-900 block">
-                        {formatCalcCurrency(grandTotalLeaseCostEgp)}
+                        {formatCalcCurrency(calcUnitRateEgp)}
                       </span>
                     </div>
 
                     <div className="bg-blue-50 p-2 rounded-lg border border-blue-200">
                       <span className="text-[10px] text-blue-700 font-bold block">
-                        {t('20% المطلوب سداده أونلاين بالضمان', '20% Paid Online Escrow')}
+                        {t('20% المطلوب أونلاين (على أول شهر فقط)', '20% Paid Online (1st Month Only)')}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-blue-700 block">
                         {formatCalcCurrency(earnestDepositEgp)}
                       </span>
                       <span className="text-[9px] text-slate-500 block mt-0.5">
-                        {t('10% عمولة المستأجر + 10% مقدم إيجار أول شهر', '10% tenant fee + 10% advance rent deduction')}
+                        {t('10% عمولة المنصة + 10% مقدم أول شهر أياً كان عدد الشهور', '10% fee + 10% 1st month advance regardless of duration')}
                       </span>
                     </div>
 
                     <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
                       <span className="text-[10px] text-emerald-700 font-bold block">
-                        {t('90% المتبقي للمالك عند الاستلام', '90% Remaining on Key Handover')}
+                        {t('المتبقي للمالك عند المقابلة والاستلام', 'Due to Landlord on Handover')}
                       </span>
                       <span className="font-mono tabular-nums font-bold text-emerald-700 block">
                         {formatCalcCurrency(remainingOnHandoverEgp)}
                       </span>
                       <span className="text-[9px] text-slate-500 block mt-0.5">
-                        {t('بعد خصم الـ 10% المقدمة التي دفعها المستأجر', '10% advance deducted from 1st month')}
+                        {t('90% من أول شهر + باقي الشهور كاملة بدون عمولة', '90% of 1st month + remaining months (0% extra fee)')}
                       </span>
                     </div>
 
                     <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 sm:col-span-2">
                       <span className="text-[10px] text-slate-600 block leading-relaxed">
                         {t(
-                          'يضمن الموقع حق الطرفين بتحصيل 20% أونلاين فقط (10% عمولة المستأجر + 10% دفعة مقدمة تُخصم من إيجار الشهر الأول)، ويتم فك قفل العنوان التفصيلي ورقم المالك فور السداد. وعند استلام الشقة يدفع المستأجر للمالك الـ 90% المتبقية فقط.',
-                          'The platform secures both parties by charging 20% online (10% tenant fee + 10% 1st month advance). Address and phone unlock instantly. Upon handover, tenant pays only 90% directly to the landlord.'
+                          'أياً كان عدد الشهور المختارة، تُحسب نسبة المنصة (20%) على أول شهر فقط (10% عمولة المستأجر + 10% مقدم يُخصم من أول شهر عند المقابلة). وباقي الشهور كاملة للمالك دون أي عمولة.',
+                          'Regardless of the number of months, the platform 20% fee applies strictly to the first month only (10% tenant fee + 10% 1st-month advance deducted on handover).'
                         )}
                       </span>
                     </div>

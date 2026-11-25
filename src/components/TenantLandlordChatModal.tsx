@@ -53,7 +53,7 @@ import {
   buildChatMessageId,
   buildChatThreadId,
   buildNotificationId,
-  computeOneTimeCommission,
+  computeEjarEscrowPricing,
   detectContactBypassAttempt,
   formatEgp,
   getCategoryCommissionPct,
@@ -163,7 +163,7 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
         apartment.category,
         platformSettings ?? { commissionRatePct: apartment.commissionRatePct || 10 }
       );
-      const commissionAmountEgp = computeOneTimeCommission(baseUnitPriceEgp, commissionRatePct);
+      const commissionAmountEgp = computeEjarEscrowPricing(baseUnitPriceEgp).onlineDueTotalEgp;
       return {
         apartmentId: apartment.id,
         apartmentTitle: apartment.title,
@@ -415,7 +415,7 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
       logFirestoreDiagnostic(err, OperationType.GET, `apartments/${computedMeta.apartmentId}`);
     }
 
-    const commissionAmountEgp = computeOneTimeCommission(resolvedBasePrice, resolvedRatePct);
+    const commissionAmountEgp = computeEjarEscrowPricing(resolvedBasePrice).onlineDueTotalEgp;
     const tenantDisplayName =
       (currentUser.displayName?.trim() || 'مستأجر موثق').slice(0, 80).length >= 2
         ? (currentUser.displayName?.trim() || 'مستأجر موثق').slice(0, 80)
@@ -1152,15 +1152,17 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
 
             <div className="bg-white border border-blue-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
               <div>
-                <div className="text-slate-500">
+                <div className="text-slate-700 font-semibold">
                   {t(
-                    `نسبة الموقع المعتمدة لهذا القطاع (${formatNumber(computedMeta.commissionRatePct)}% مرة واحدة)`,
-                    `Sector Commission (${formatNumber(computedMeta.commissionRatePct)}% one-time)`
+                    'نسبة الموقع (20% على إيجار أول شهر فقط مهما كان عدد الشهور)',
+                    'Site Fee (20% on 1st Month Only Regardless of Duration)'
                   )}
                 </div>
-                <div className="text-[11px] text-slate-500 mt-0.5 font-mono tabular-nums">
-                  {t('على أساس إيجار:', 'Based on unit rate:')}{' '}
-                  {formatNumber(computedMeta.baseUnitPriceEgp)} {t('ج.م', 'EGP')}
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {t(
+                    `10% عمولة + 10% مقدم يُخصم من أول شهر عند المقابلة · إيجار الشهر الأول: ${formatNumber(computedMeta.baseUnitPriceEgp)} ج.م`,
+                    `10% fee + 10% 1st-month advance deducted on handover · 1st mo: ${formatNumber(computedMeta.baseUnitPriceEgp)} EGP`
+                  )}
                 </div>
               </div>
               <div className="text-lg font-extrabold font-mono tabular-nums text-blue-700">

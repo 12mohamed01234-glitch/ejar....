@@ -1289,36 +1289,43 @@ export function normalizeApartmentRecord(
 }
 
 export interface EjarEscrowPricingStructure {
-  monthlyRentEgp: number; // 100% of rent
-  tenantCommissionRatePct: number; // 10%
-  tenantCommissionEgp: number; // 10%
-  landlordCommissionRatePct: number; // 10%
-  landlordCommissionEgp: number; // 10%
-  onlineDueTotalEgp: number; // 20% (10% tenant fee + 10% advance from 1st month rent)
-  remainingPayableToLandlordEgp: number; // 90% of 1st month rent upon handover
-  totalLeaseCommitmentEgp: number; // 110% (100% rent + 10% tenant commission)
+  monthlyRentEgp: number; // 100% of first month / unit rent
+  tenantCommissionRatePct: number; // 10% of first month only
+  tenantCommissionEgp: number; // 10% of first month only
+  landlordCommissionRatePct: number; // 10% of first month only
+  landlordCommissionEgp: number; // 10% of first month only
+  onlineDueTotalEgp: number; // 20% of first month only (regardless of lease months)
+  remainingFirstMonthEgp: number; // 90% of first month due to landlord
+  remainingPayableToLandlordEgp: number; // 90% of 1st month + remaining months (with 0% extra fee)
+  totalLeaseCommitmentEgp: number; // total rent + 10% tenant commission on 1st month
 }
 
 /**
- * Standardized 20% upfront escrow formula across the entire site:
- * - 10% Tenant platform brokerage fee
- * - 10% Landlord fee paid upfront from first month's rent
- * - Remaining 90% paid directly to landlord upon meetup and key handover (10% deducted)
+ * Standardized 20% upfront escrow formula across the entire site (FIRST MONTH ONLY, regardless of total months):
+ * - 10% Tenant platform brokerage fee (on 1st month only)
+ * - 10% Landlord fee paid upfront from 1st month's rent (deducted when tenant meets landlord)
+ * - Remaining 90% of 1st month (+ 100% of any subsequent months) paid directly to landlord on handover
  */
-export function computeEjarEscrowPricing(rentEgp: number): EjarEscrowPricingStructure {
-  const safeRent = Math.max(0, Math.round(rentEgp || 0));
-  const tenantFee = Math.round(safeRent * 0.10);
-  const landlordFee = Math.round(safeRent * 0.10);
-  const onlineDue = tenantFee + landlordFee; // exactly 20%
-  const remainingHandover = Math.max(0, safeRent - landlordFee); // exactly 90%
-  const totalCommitment = safeRent + tenantFee; // 110%
+export function computeEjarEscrowPricing(
+  firstMonthRentEgp: number,
+  totalLeaseRentEgp?: number
+): EjarEscrowPricingStructure {
+  const safeFirstMonth = Math.max(0, Math.round(firstMonthRentEgp || 0));
+  const safeTotalLease = Math.max(safeFirstMonth, Math.round(totalLeaseRentEgp ?? safeFirstMonth));
+  const tenantFee = Math.round(safeFirstMonth * 0.10);
+  const landlordFee = Math.round(safeFirstMonth * 0.10);
+  const onlineDue = tenantFee + landlordFee; // exactly 20% of FIRST MONTH ONLY
+  const remainingFirstMonth = Math.max(0, safeFirstMonth - landlordFee); // 90% of first month
+  const remainingHandover = Math.max(0, safeTotalLease - landlordFee); // 90% of 1st month + rest of months
+  const totalCommitment = safeTotalLease + tenantFee;
   return {
-    monthlyRentEgp: safeRent,
+    monthlyRentEgp: safeFirstMonth,
     tenantCommissionRatePct: 10,
     tenantCommissionEgp: tenantFee,
     landlordCommissionRatePct: 10,
     landlordCommissionEgp: landlordFee,
     onlineDueTotalEgp: onlineDue,
+    remainingFirstMonthEgp: remainingFirstMonth,
     remainingPayableToLandlordEgp: remainingHandover,
     totalLeaseCommitmentEgp: totalCommitment,
   };

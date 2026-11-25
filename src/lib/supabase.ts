@@ -12,6 +12,7 @@ import {
   PlatformSettingsRecord,
   normalizePlatformSettings,
   BannedUserRecord,
+  computeEjarEscrowPricing,
 } from './validation';
 import { UserAccountData } from '../components/AuthModal';
 
@@ -893,7 +894,7 @@ export async function fetchSupabaseBookings(userId: string): Promise<BookingReco
             escrowAmountEgp: Number(b.escrow_amount_egp),
             commissionAmountEgp: Number(b.commission_amount_egp),
             platformCommissionEgp: Number(b.commission_amount_egp || 0),
-            landlordNetEgp: Number(b.total_rent_egp) - Number(b.commission_amount_egp || 0),
+            landlordNetEgp: Math.max(0, Number(b.total_rent_egp) - Math.round(Number(b.commission_amount_egp || 0) / 2)),
             status: b.status,
             paymentMethod: b.payment_method,
             createdAt: { toMillis: () => new Date(b.created_at).getTime() },
@@ -917,6 +918,10 @@ export async function fetchSupabaseBookings(userId: string): Promise<BookingReco
 }
 
 export async function createSupabaseBooking(record: BookingRecord): Promise<BookingRecord> {
+  const firstMonthPricing = computeEjarEscrowPricing(
+    record.unitPriceEgp || record.monthlyRentEgp || record.totalRentEgp,
+    record.totalRentEgp
+  );
   const row = {
     id: record.id,
     apartment_id: record.apartmentId,
@@ -927,8 +932,8 @@ export async function createSupabaseBooking(record: BookingRecord): Promise<Book
     rental_unit: record.rentalUnit,
     units_count: record.unitsCount,
     total_rent_egp: record.totalRentEgp,
-    escrow_amount_egp: record.escrowAmountEgp || Math.round(record.totalRentEgp * 0.1),
-    commission_amount_egp: record.commissionAmountEgp || Math.round(record.totalRentEgp * 0.1),
+    escrow_amount_egp: record.escrowAmountEgp || firstMonthPricing.onlineDueTotalEgp,
+    commission_amount_egp: record.commissionAmountEgp || firstMonthPricing.onlineDueTotalEgp,
     status: record.status || 'escrow_paid',
     payment_method: record.paymentMethod,
     reference_number: record.paymentReference || '',
