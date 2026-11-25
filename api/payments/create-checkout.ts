@@ -31,6 +31,22 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown) {
   res.end(JSON.stringify(data));
 }
 
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQ = 20;
+const ipRequests = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = ipRequests.get(ip);
+  if (!entry || now > entry.resetAt) {
+    ipRequests.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT_MAX_REQ) return false;
+  entry.count += 1;
+  return true;
+}
+
 export default async function handler(
   req: IncomingMessage & { body?: unknown },
   res: ServerResponse
@@ -39,14 +55,25 @@ export default async function handler(
     return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
+  const clientIp = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  if (!checkRateLimit(clientIp)) {
+    return sendJson(res, 429, { error: 'تم تجاوز الحد المسموح من المحاولات، يرجى الانتظار دقيقة.' });
+  }
+
   try {
     const body = await readJsonBody(req);
     const amountEgp = Math.round(Number(body.amountEgp) || 0);
     const paymentMethod = body.paymentMethod || 'card_meeza';
     const purpose = body.purpose || 'booking';
 
-    if (amountEgp <= 0) {
-      return sendJson(res, 400, { error: 'المبلغ يجب أن يكون أكبر من صفر' });
+    const allowedPurposes = new Set(['booking', 'wallet_deposit', 'listing_commission']);
+    const allowedMethods = new Set(['card_meeza', 'mobile_wallet', 'fawry', 'instapay']);
+
+    if (!allowedPurposes.has(purpose) || !allowedMethods.has(paymentMethod)) {
+      return sendJson(res, 400, { error: 'طلب دفع غير صالح' });
+    }
+    if (!Number.isFinite(amountEgp) || amountEgp < 1 || amountEgp > 5_000_000) {
+      return sendJson(res, 400, { error: 'المبلغ يجب أن يكون بين 1 و 5,000,000 جنيه مصري' });
     }
 
     const merchantInstaPayAddress =

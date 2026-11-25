@@ -38,8 +38,6 @@ import { useI18n } from '../lib/i18n';
 import { EjarLogo } from './EjarLogo';
 import {
   PLATFORM_ADMIN_EMAIL,
-  PLATFORM_ADMIN_ALT_EMAIL,
-  PLATFORM_ADMIN_PASSWORD,
   PLATFORM_ADMIN_INFO,
   isPlatformAdminEmail,
 } from '../lib/firebase';
@@ -293,17 +291,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (isAdminAccount) {
-      if (password !== PLATFORM_ADMIN_PASSWORD) {
-        setErrorMsg(
-          t(
-            '⛔ كلمة المرور غير صحيحة لحساب مالك المنصة! لا يمكن الدخول إلا بكلمة المرور الرسمية المعتمدة لمالك المنصة.',
-            '⛔ Incorrect password for platform owner account! Access is strictly protected.'
-          )
-        );
-        return;
-      }
-    } else if (!password || password.length < 6) {
+    if (!password || password.length < 6) {
       setErrorMsg(t('كلمة المرور يجب أن تكون 6 أحرف على الأقل', 'Password must be at least 6 characters'));
       return;
     }
@@ -311,6 +299,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     try {
       if (isAdminAccount) {
+        // Verify admin securely on server (/api/auth/admin-login) OR Supabase Auth — zero client-side password!
+        let serverVerified = false;
+        try {
+          const resp = await fetch('/api/auth/admin-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: trimmedEmail, password }),
+          });
+          if (resp.ok) {
+            const j = (await resp.json()) as { ok?: boolean };
+            if (j.ok) serverVerified = true;
+          } else if (resp.status === 401) {
+            setErrorMsg(
+              t(
+                '⛔ كلمة المرور غير صحيحة لحساب مالك المنصة! لا يمكن الدخول إلا بكلمة المرور الرسمية المعتمدة.',
+                '⛔ Incorrect password for platform owner account! Access is strictly protected.'
+              )
+            );
+            return;
+          }
+        } catch {
+          // Fall through to Supabase Auth check
+        }
+
+        if (!serverVerified) {
+          const { error: sbAdminErr } = await supabase.auth.signInWithPassword({
+            email: trimmedEmail,
+            password,
+          });
+          if (sbAdminErr) {
+            setErrorMsg(
+              t(
+                '⛔ كلمة المرور غير صحيحة أو لم يتم ضبط PLATFORM_ADMIN_PASSWORD في إعدادات Vercel.',
+                '⛔ Invalid admin credentials or PLATFORM_ADMIN_PASSWORD not set on server.'
+              )
+            );
+            return;
+          }
+        }
+
         const adminUserData: UserAccountData = {
           uid: 'admin_owner_01',
           displayName: PLATFORM_ADMIN_INFO.name,

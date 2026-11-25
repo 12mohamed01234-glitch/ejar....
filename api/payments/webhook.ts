@@ -34,7 +34,10 @@ function verifyPaymobHmac(obj: Record<string, any>, receivedHmac: string, hmacSe
     .update(concatenated)
     .digest('hex');
 
-  return computed.toLowerCase() === receivedHmac.toLowerCase();
+  const bufA = Buffer.from(computed.toLowerCase(), 'utf8');
+  const bufB = Buffer.from(receivedHmac.toLowerCase(), 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 export default async function handler(
@@ -75,7 +78,12 @@ export default async function handler(
       const receivedHmac = urlObj.searchParams.get('hmac') || body?.hmac || '';
       const hmacSecret = process.env.PAYMOB_HMAC_SECRET?.trim() || '';
 
-      if (hmacSecret && !verifyPaymobHmac(obj, receivedHmac, hmacSecret)) {
+      if (!hmacSecret) {
+        res.statusCode = 503;
+        res.end(JSON.stringify({ error: 'Webhook HMAC secret not configured' }));
+        return;
+      }
+      if (!verifyPaymobHmac(obj, receivedHmac, hmacSecret)) {
         res.statusCode = 401;
         res.end(JSON.stringify({ error: 'Invalid Paymob HMAC signature' }));
         return;

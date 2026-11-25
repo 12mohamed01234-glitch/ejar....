@@ -59,8 +59,7 @@ export const PLATFORM_ADMIN_EMAIL =
   import.meta.env.VITE_PLATFORM_ADMIN_EMAIL || 'admin@meftahmisr.com';
 export const PLATFORM_ADMIN_ALT_EMAIL =
   import.meta.env.VITE_PLATFORM_ADMIN_ALT_EMAIL || '12mohamed01234@gmail.com';
-export const PLATFORM_ADMIN_PASSWORD =
-  import.meta.env.VITE_PLATFORM_ADMIN_PASSWORD || 'MeftahMisr@2026#Owner';
+export const PLATFORM_ADMIN_PASSWORD = '';
 
 export const PLATFORM_ADMIN_INFO = {
   email: PLATFORM_ADMIN_EMAIL,
