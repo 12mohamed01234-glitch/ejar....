@@ -121,6 +121,7 @@ import {
   getSupabaseProfileByEmail,
   checkSupabaseConnection,
   fetchSupabaseBannedUsers,
+  banSupabaseUser,
   SupabaseHealth,
   emptyWallet,
 } from './lib/supabase';
@@ -731,15 +732,24 @@ export function App() {
       const nowMs = Date.now();
       const banRecord: BannedUserRecord = {
         userId: targetUid,
-        displayName: currentUser?.displayName || 'مستخدم مخالف',
-        reason,
+        displayName: effectiveUser?.displayName || currentUser?.displayName || 'مستخدم مخالف',
+        reason: `[AI Guardian] ${reason}`,
         hideListings: true,
-        bannedByUid: currentUser?.uid || 'system',
+        bannedByUid: 'ai_guardian',
         createdAtMs: nowMs,
         updatedAtMs: nowMs,
       };
       setMyBanRecord(banRecord);
-      showToast(`تم تجميد الحساب لمخالفة سياسة المنصة: ${reason}`);
+      setSupabaseBannedUsers((prev) => [
+        banRecord,
+        ...prev.filter((item) => item.userId !== targetUid),
+      ]);
+      showToast(`🤖 قرار فوري من مراقب الذكاء الاصطناعي: تم حظر الحساب لمخالفة القوانين (${reason})`);
+      try {
+        await banSupabaseUser(banRecord);
+      } catch {
+        // Keep local/Firestore fallback
+      }
       if (currentUser && sessionTokenReady) {
         try {
           await setDoc(doc(db, 'bannedUsers', targetUid), {
@@ -752,7 +762,7 @@ export function App() {
         }
       }
     },
-    [currentUser, sessionTokenReady, showToast]
+    [currentUser, effectiveUser?.displayName, sessionTokenReady, showToast]
   );
 
   const reportConnectivityIssue = useCallback((diag: CloudConnectionDiag) => {
@@ -2534,6 +2544,26 @@ export function App() {
     return supabaseBannedUsers.find((b) => b.userId === uid) || null;
   }, [myBanRecord, effectiveUser?.uid, supabaseBannedUsers]);
 
+  const hasPaidForApartmentChat = useCallback(
+    (aptId: string, ownerId?: string, thread?: ChatThreadRecord | null): boolean => {
+      if (isAdmin) return true;
+      if (effectiveUser?.uid && ownerId && effectiveUser.uid === ownerId) return true;
+      if (effectiveUser?.uid && thread?.landlordId === effectiveUser.uid) return true;
+      if (thread?.commissionPaid) return true;
+      const hasPaidBooking = myTenantBookings.some(
+        (b) =>
+          b.apartmentId === aptId &&
+          (b.status === 'escrow_paid' || b.status === 'completed')
+      );
+      if (hasPaidBooking) return true;
+      const hasPaidRequest = myTenantRequests.some(
+        (r) => r.apartmentId === aptId && r.status === 'approved'
+      );
+      return hasPaidRequest;
+    },
+    [isAdmin, effectiveUser?.uid, myTenantBookings, myTenantRequests]
+  );
+
   const handleOpenListingWizard = useCallback(() => {
     if (!effectiveUser) {
       showToast(
@@ -3066,33 +3096,37 @@ export function App() {
                   setCheckoutApartment(apt);
                 }}
                 onOpenChatForApartment={(apt) => {
-                  if (!isBlueVerified) {
+                  if (!effectiveUser) {
+                    handleStartBooking(apt);
+                    return;
+                  }
+                  if (!hasPaidForApartmentChat(apt.id, apt.ownerId)) {
                     showToast(
                       t(
-                        'عفواً، يجب توثيق هويتك بالعلامة الزرقاء أولاً للتواصل مع الملاك.',
-                        'You must be verified with the Blue Badge to contact landlords.'
+                        '🔒 الشات مع المالك مقفل! يجب إتمام الدفع عبر بوابة الدفع أو من رصيد محفظتك المشحون لفتح المحادثة.',
+                        '🔒 Chat is locked! Complete payment via gateway or your wallet balance to unlock chat.'
                       )
                     );
-                    setActiveTab('kyc');
+                    handleStartBooking(apt);
                     return;
                   }
                   setChatModalTarget({ apartment: apt, thread: null });
                 }}
                 onOpenChatThread={(thread) => {
-                  if (!isBlueVerified) {
-                    showToast(
-                      t(
-                        'عفواً، يجب توثيق هويتك بالعلامة الزرقاء أولاً للتواصل مع الملاك.',
-                        'You must be verified with the Blue Badge to contact landlords.'
-                      )
-                    );
-                    setActiveTab('kyc');
-                    return;
-                  }
                   const matchedApt =
                     mergedExploreApartments.find((a) => a.id === thread.apartmentId) ||
                     SHOWCASE_APARTMENTS.find((a) => a.id === thread.apartmentId) ||
                     null;
+                  if (!hasPaidForApartmentChat(thread.apartmentId, thread.landlordId, thread)) {
+                    showToast(
+                      t(
+                        '🔒 الشات مع المالك مقفل! يجب إتمام الدفع عبر بوابة الدفع أو من رصيد محفظتك المشحون لفتح المحادثة.',
+                        '🔒 Chat is locked! Complete payment via gateway or your wallet balance to unlock chat.'
+                      )
+                    );
+                    if (matchedApt) handleStartBooking(matchedApt);
+                    return;
+                  }
                   setChatModalTarget({ apartment: matchedApt, thread });
                 }}
               />
@@ -3306,15 +3340,20 @@ export function App() {
               handleStartBooking(apt);
             }}
             onOpenChat={(apt) => {
-              if (!isBlueVerified) {
+              if (!effectiveUser) {
+                setSelectedApartment(null);
+                handleStartBooking(apt);
+                return;
+              }
+              if (!hasPaidForApartmentChat(apt.id, apt.ownerId)) {
                 showToast(
                   t(
-                    'عفواً، يجب توثيق هويتك بالعلامة الزرقاء أولاً للتواصل مع الملاك.',
-                    'You must be verified with the Blue Badge to contact landlords.'
+                    '🔒 الشات مع المالك مقفل! يجب إتمام الدفع عبر بوابة الدفع أو من رصيد محفظتك المشحون لفتح المحادثة.',
+                    '🔒 Chat is locked! Complete payment via gateway or your wallet balance to unlock chat.'
                   )
                 );
                 setSelectedApartment(null);
-                setActiveTab('kyc');
+                handleStartBooking(apt);
                 return;
               }
               setSelectedApartment(null);

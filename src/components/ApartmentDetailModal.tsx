@@ -1552,24 +1552,24 @@ export const ApartmentDetailModal: React.FC<ApartmentDetailModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        if (tenantWallet && tenantWallet.balanceEgp < 500 && onOpenWallet) {
-                          onOpenWallet();
-                        } else {
+                        if (isBookedByCurrentUser) {
                           onOpenChat(apartment);
+                        } else {
+                          onProceedToRent(apartment);
                         }
                       }}
                       className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold rounded-xl transition-colors inline-flex items-center justify-center gap-2 whitespace-nowrap"
                     >
                       <MessageSquareLock className="w-4 h-4 text-blue-700 shrink-0" />
                       <span>
-                        {tenantWallet && tenantWallet.balanceEgp < 500
+                        {isBookedByCurrentUser
                           ? t(
-                              'محادثة المالك (يلزم رصيد جدية حجز بالمحفظة)',
-                              'Chat with Landlord (Deposit Required)'
+                              'محادثة المالك (مفتوحة ومراقبة بالذكاء الاصطناعي)',
+                              'Chat with Landlord (AI-Monitored & Unlocked)'
                             )
                           : t(
-                              'محادثة المالك (محمية ومؤمنة 100%)',
-                              'Chat with Landlord (100% Secure)'
+                              '🔒 ادفع لفتح الشات مع المالك (بوابة الدفع / المحفظة)',
+                              '🔒 Pay to Unlock Chat with Landlord (Gateway / Wallet)'
                             )}
                       </span>
                     </button>

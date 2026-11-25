@@ -2408,7 +2408,10 @@ export interface ContactBypassDetectionResult {
   | 'digit_sequence'
   | 'spelled_number'
   | 'external_channel'
-  | 'circumvention_phrase';
+  | 'circumvention_phrase'
+  | 'financial_fraud'
+  | 'abuse_harassment'
+  | 'soft_policy_warning';
   reasonAr: string;
   reasonEn: string;
   isDirectBypassViolation: boolean;
@@ -2577,14 +2580,53 @@ export function detectContactBypassAttempt(rawText: string): ContactBypassDetect
 
   // 5. Direct circumvention / bypass phrases (طلب تواصل خارجي أو كاش خارج الموقع)
   const circumventionRegex =
-    /(ابعت\s*رقمك|هات\s*رقمك|ابعتلي\s*رقمك|رقمي\s*(?:اهو|هو|دا)|كلمني\s*(?:فون|خاص|موبايل|واتس|برة|بره)|اتصل\s*بي[اه]|تلفوني|نمرتي|موبايلي|بر[ةه]\s*(?:الموقع|المنصة)|كاش\s*يد\s*بيد|تواصل\s*خارجي|نتقابل\s*بر[ةه]|نتعامل\s*بر[ةه]|call\s*me|my\s*phone|out\s*of\s*platform)/i;
+    /(ابعت\s*رقمك|هات\s*رقمك|ابعتلي\s*رقمك|رقمي\s*(?:اهو|هو|دا)|كلمني\s*(?:فون|خاص|موبايل|واتس|برة|بره)|اتصل\s*بي[اه]|تلفوني|نمرتي|موبايلي|بر[ةه]\s*(?:الموقع|المنصة)|كاش\s*يد\s*بيد|تواصل\s*خارجي|نتعامل\s*بر[ةه]|call\s*me|my\s*phone|out\s*of\s*platform)/i;
   if (circumventionRegex.test(ascii)) {
     return {
       blocked: true,
       reasonCode: 'circumvention_phrase',
-      reasonAr: 'تم رصد عبارة تحايل لطلب التواصل الخارجي أو الالتفاف على المنصة — يُطبق نظام الحظر الصارم فوراً.',
+      reasonAr: 'تم رصد عبارة تحايل لطلب التواصل الخارجي أو الالتفاف على المنصة — يُطبق الحظر الفوري تلقائياً.',
       reasonEn: 'Detected circumvention phrase attempting external communication or platform bypass.',
       isDirectBypassViolation: true,
+    };
+  }
+
+  // 6. Financial / Identity Fraud & Direct Off-Platform Payment Requests (Critical -> Immediate AI Ban)
+  const fraudRegex =
+    /(رقم\s*الفيزا|cvv|كود\s*التفعيل|رمز\s*التحقق|otp|باسورد|كلمة\s*السر|حول\s*(?:لي|لى)?\s*(?:فودافون|انستا|اتصالات|اورانج)|عربون\s*بر[ةه]|تحويل\s*مباشر\s*لحسابي)/i;
+  if (fraudRegex.test(ascii)) {
+    return {
+      blocked: true,
+      reasonCode: 'financial_fraud',
+      reasonAr: 'محاولة طلب تحويل مالي خارج بوابة الدفع الضامنة أو طلب بيانات بنكية/سرية — مخالفة جسيمة تستوجب الحظر الفوري.',
+      reasonEn: 'Attempted off-platform payment or sensitive financial data request — immediate AI ban.',
+      isDirectBypassViolation: true,
+    };
+  }
+
+  // 7. Abusive Language, Threats, or Harassment (Critical -> Immediate AI Ban)
+  const abuseRegex =
+    /(حرامي|نصاب|هقتلك|هضربك|هفضحك|بلطج|يا\s*(?:كلب|حمار|غبي|زبالة)|يلعن|تهديد)/i;
+  if (abuseRegex.test(ascii)) {
+    return {
+      blocked: true,
+      reasonCode: 'abuse_harassment',
+      reasonAr: 'رصد ألفاظ مسيئة أو تهديد صريح — يطبق الذكاء الاصطناعي الحظر الفوري لحماية مستخدمي المنصة.',
+      reasonEn: 'Detected abusive language or threat — immediate AI ban applied.',
+      isDirectBypassViolation: true,
+    };
+  }
+
+  // 8. Medium-risk policy warning (First offense = AI warning, Second offense = AI ban)
+  const softWarningRegex =
+    /(نتقابل\s*بر[ةه]|ابعت\s*لوكيشن|ابعتلي\s*اللوكيشن|العنوان\s*بالتفصيل|اشوف\s*الشقة\s*بدون\s*حجز|نلغي\s*الحجز)/i;
+  if (softWarningRegex.test(ascii)) {
+    return {
+      blocked: true,
+      reasonCode: 'soft_policy_warning',
+      reasonAr: 'تنبيه من مراقب الذكاء الاصطناعي: يُمنع ترتيب معاينة أو إلغاء الحجز خارج سجل المنصة الرسمي؛ تكرار المخالفة يؤدي للحظر التلقائي.',
+      reasonEn: 'AI Guardian Warning: Off-platform meetups or bypassing booking records is prohibited; repeating triggers an automatic ban.',
+      isDirectBypassViolation: false,
     };
   }
 

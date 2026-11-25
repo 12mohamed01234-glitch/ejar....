@@ -109,6 +109,8 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [locatingGps, setLocatingGps] = useState(false);
+  const [gpsStatusMsg, setGpsStatusMsg] = useState<string | null>(null);
 
   // Step 1: Unit Specs, Multi-Currency Pricing & 360° Virtual Tour
   const [category, setCategory] = useState<ListingCategory>('family_apartment');
@@ -1345,26 +1347,66 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={locatingGps}
                     onClick={() => {
-                      if (navigator.geolocation) {
-                        navigator.geolocation.getCurrentPosition(
-                          (pos) => {
-                            const newLat = Number(pos.coords.latitude.toFixed(5));
-                            const newLng = Number(pos.coords.longitude.toFixed(5));
-                            setLat(newLat);
-                            setLng(newLng);
-                            setMapPanTarget({ lat: newLat, lng: newLng, zoom: 15, nonce: Date.now() });
-                          },
-                          () => {
-                            setErrorMsg(t('تعذر تحديد موقعك الحالي. يرجى تفعيل إذن الموقع في متصفحك.', 'Could not get current location. Please enable GPS permissions.'));
-                          }
+                      setErrorMsg(null);
+                      setGpsStatusMsg(null);
+                      if (!navigator.geolocation) {
+                        setErrorMsg(
+                          t(
+                            'المتصفح لا يدعم تحديد الموقع التلقائي، يمكنك الضغط على الخريطة أو إدخال الإحداثيات يدوياً.',
+                            'Geolocation is not supported by your browser.'
+                          )
                         );
+                        return;
                       }
+                      setLocatingGps(true);
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                          const newLat = Number(pos.coords.latitude.toFixed(5));
+                          const newLng = Number(pos.coords.longitude.toFixed(5));
+                          setLat(newLat);
+                          setLng(newLng);
+                          setMapPanTarget({ lat: newLat, lng: newLng, zoom: 15, nonce: Date.now() });
+                          setLocatingGps(false);
+                          setGpsStatusMsg(
+                            t('تم تحديد موقعك الحالي بنجاح ✓', 'Current GPS location set ✓')
+                          );
+                        },
+                        (geoErr) => {
+                          setLocatingGps(false);
+                          if (geoErr?.code === 1) {
+                            setErrorMsg(
+                              t(
+                                'تم رفض إذن الموقع في المتصفح. اضغط على أيقونة القفل بجانب رابط الموقع واسمح بـ Location.',
+                                'Location permission denied. Enable Location in browser site settings.'
+                              )
+                            );
+                          } else {
+                            setErrorMsg(
+                              t(
+                                'تعذر التقاط إشارة الـ GPS حالياً. تأكد من تفعيل الموقع أو اضغط على الخريطة لتحديد مكان الوحدة.',
+                                'Could not capture GPS signal. Click on the map to pin your unit.'
+                              )
+                            );
+                          }
+                        },
+                        { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 }
+                      );
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg border border-blue-200 text-[11px] transition-colors"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 disabled:opacity-60 text-blue-700 font-bold rounded-lg border border-blue-200 text-[11px] transition-colors"
                   >
-                    <span>📍 {t('موقعي الحالي', 'Current GPS')}</span>
+                    <span>
+                      {locatingGps
+                        ? t('⏳ جاري تحديد موقعك...', '⏳ Locating...')
+                        : `📍 ${t('موقعي الحالي', 'Current GPS')}`}
+                    </span>
                   </button>
+                  {gpsStatusMsg && (
+                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                      {gpsStatusMsg}
+                    </span>
+                  )}
                   <span className="font-mono tabular-nums text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                     {typeof lat === 'number' ? lat.toFixed(4) : lat}, {typeof lng === 'number' ? lng.toFixed(4) : lng}
                   </span>

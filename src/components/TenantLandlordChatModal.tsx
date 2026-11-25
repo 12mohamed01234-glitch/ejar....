@@ -547,21 +547,7 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
     const bodyText = (presetBody ?? draft).trim();
     if (!bodyText) return;
 
-    // Check Wallet Deposit Balance for Tenants
-    if (myRole === 'tenant' && !isAdmin) {
-      const hasDeposit = (tenantWallet?.balanceEgp ?? 0) >= 500;
-      if (!hasDeposit) {
-        setErrorMsg(
-          t(
-            'يلزم شحن رصيد جدية الحجز (1000 ج.م أو 10%) في محفظتك للتواصل مع أصحاب العقارات — الرصيد يظل محفوظاً في محفظتك ولا يُخصم إلا عند تثبيت الحجز.',
-            'A booking deposit balance (1000 EGP) is required to chat with landlords. It is only deducted upon final booking confirmation.'
-          )
-        );
-        return;
-      }
-    }
-
-    // 1. Strict Privacy & Anti-Bypass Check
+    // 1. Strict AI Policy & Anti-Bypass Check (enforces platform rules & bans immediately on severe violations)
     const check = detectContactBypassAttempt(bodyText);
     if (check.blocked) {
       const nextStrikes = myViolationCount + 1;
@@ -902,6 +888,15 @@ export const TenantLandlordChatModal: React.FC<TenantLandlordChatModalProps> = (
             >
               {computedMeta.apartmentTitle}
             </h2>
+            <div className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-[10px] font-bold text-indigo-800">
+              <span>🤖</span>
+              <span>
+                {t(
+                  'مراقب بالذكاء الاصطناعي (AI) — حظر فوري تلقائي عند مخالفة القوانين',
+                  'AI-Monitored Chat — Automatic instant ban on policy violations'
+                )}
+              </span>
+            </div>
           </div>
 
           <button
