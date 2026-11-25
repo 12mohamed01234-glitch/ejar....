@@ -54,6 +54,8 @@ import {
 import { createSupabaseApartment } from '../lib/supabase';
 import { useI18n } from '../lib/i18n';
 import { ApartmentImage } from './ApartmentImage';
+import { PaymobGatewayBox } from './PaymobGatewayBox';
+import { GatewayPaymentMethod } from '../lib/payments';
 import {
   VirtualTour360Viewer,
   compressPanoramaImageToDataUrl,
@@ -271,7 +273,7 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
   // Step 3: Exclusive Mandate, Commission Payment & Digital Signature
   const [digitalSignatureName, setDigitalSignatureName] = useState('');
   const [exclusivityAccepted, setExclusivityAccepted] = useState(false);
-  const [commissionPaymentMethod, setCommissionPaymentMethod] = useState<'instapay' | 'vodafone_cash' | 'bank_card'>('instapay');
+  const [commissionPaymentMethod, setCommissionPaymentMethod] = useState<GatewayPaymentMethod>('card_meeza');
   const [commissionPaymentRef, setCommissionPaymentRef] = useState('');
   const [commissionPaidConfirmed, setCommissionPaidConfirmed] = useState(false);
 
@@ -1746,42 +1748,33 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
             </div>
 
             {oneTimeCommissionSample > 0 ? (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {[
-                    { id: 'instapay' as const, label: t('إنستا باي (InstaPay)', 'InstaPay') },
-                    { id: 'vodafone_cash' as const, label: t('محفظة إلكترونية (فودافون كاش)', 'Mobile Wallet') },
-                    { id: 'bank_card' as const, label: t('بطاقة بنكية (Visa / Mastercard)', 'Bank Card') },
-                  ].map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setCommissionPaymentMethod(m.id)}
-                      className={`min-h-[44px] px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${
-                        commissionPaymentMethod === m.id
-                          ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
+              <div className="space-y-4">
+                <PaymobGatewayBox
+                  purpose="listing_commission"
+                  amountEgp={oneTimeCommissionSample}
+                  selectedMethod={commissionPaymentMethod}
+                  onSelectMethod={setCommissionPaymentMethod}
+                  userId={currentUser?.uid}
+                  userEmail={currentUser?.email}
+                  userName={ownerDisplayName || currentUser?.displayName}
+                  userPhone={ownerPhone}
+                  apartmentTitle={title || 'عرض وحدة على إيجار'}
+                  onReferenceReady={(ref, _method, isLive) => {
+                    setCommissionPaymentRef(ref);
+                    if (isLive) setCommissionPaidConfirmed(true);
+                  }}
+                />
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end pt-2 border-t border-blue-200/70">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      {commissionPaymentMethod === 'instapay'
-                        ? t('حساب التحويل / رقم العملية المرجعي (InstaPay)', 'InstaPay Address / Transfer Ref')
-                        : commissionPaymentMethod === 'vodafone_cash'
-                          ? t('رقم المحفظة المحول منها أو رقم العملية', 'Wallet Number / Transaction Ref')
-                          : t('آخر 4 أرقام من البطاقة أو رقم الموافقة', 'Card Last 4 Digits / Approval Ref')}
+                      {t('الرقم المرجعي للعملية / إثبات السداد', 'Payment / Transaction Reference')}
                     </label>
                     <input
                       type="text"
                       value={commissionPaymentRef}
                       onChange={(e) => setCommissionPaymentRef(e.target.value)}
-                      placeholder={t('مثال: TXN-984512 أو 01012345678', 'e.g. TXN-984512')}
+                      placeholder={t('يُملأ تلقائياً بعد الدفع أو أدخل رقم التحويل', 'Auto-filled after Paymob or enter ref')}
                       className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-mono"
                     />
                   </div>
@@ -1794,7 +1787,7 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
                       className="w-4 h-4 rounded border-slate-300 text-blue-700"
                     />
                     <span>
-                      {t('تم دفع مبلغ العمولة بالكامل وتأكيد التحويل', 'I confirm full commission payment')}
+                      {t('تم سداد مبلغ العمولة بالكامل وتأكيد التحويل', 'I confirm full commission payment')}
                     </span>
                   </label>
                 </div>

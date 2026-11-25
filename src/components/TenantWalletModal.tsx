@@ -32,6 +32,8 @@ import {
   MIN_SERIOUSNESS_DEPOSIT_EGP,
 } from '../lib/validation';
 import { useI18n } from '../lib/i18n';
+import { PaymobGatewayBox } from './PaymobGatewayBox';
+import { GatewayPaymentMethod } from '../lib/payments';
 
 interface TenantWalletModalProps {
   isOpen: boolean;
@@ -419,173 +421,35 @@ export const TenantWalletModal: React.FC<TenantWalletModalProps> = ({
               </div>
             </div>
 
-            {/* Payment Method Selector */}
-            <div className="space-y-2 pt-2">
-              <label className="block text-xs font-semibold text-slate-700">
-                {t('وسيلة الدفع المصرية المعتمدة:', 'Select Payment Method:')}
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('instapay')}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center gap-1.5 ${
-                    paymentMethod === 'instapay'
-                      ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-2 ring-emerald-500/30'
-                      : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
-                  }`}
-                >
-                  <Zap className="w-4 h-4 text-emerald-600" />
-                  <span className="text-[11px] font-bold">إنستاباي (InstaPay)</span>
-                  <span className="text-[9px] text-emerald-700">تحويل فوري 0% عمولة</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('mobile_wallet')}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center gap-1.5 ${
-                    paymentMethod === 'mobile_wallet'
-                      ? 'bg-rose-50 border-rose-500 text-rose-900 ring-2 ring-rose-500/30'
-                      : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
-                  }`}
-                >
-                  <Smartphone className="w-4 h-4 text-rose-600" />
-                  <span className="text-[11px] font-bold">فودافون / أورنج كاش</span>
-                  <span className="text-[9px] text-rose-700">محفظة إلكترونية</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('card_meeza')}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center gap-1.5 ${
-                    paymentMethod === 'card_meeza'
-                      ? 'bg-blue-50 border-blue-600 text-blue-900 ring-2 ring-blue-600/30'
-                      : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
-                  }`}
-                >
-                  <CreditCard className="w-4 h-4 text-blue-600" />
-                  <span className="text-[11px] font-bold">فيزا / ميزة / كارت</span>
-                  <span className="text-[9px] text-blue-700">بطاقة بنكية مباشرة</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('fawry')}
-                  className={`p-3 rounded-xl border text-center transition-all flex flex-col items-center gap-1.5 ${
-                    paymentMethod === 'fawry'
-                      ? 'bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-500/30'
-                      : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
-                  }`}
-                >
-                  <Receipt className="w-4 h-4 text-amber-600" />
-                  <span className="text-[11px] font-bold">منافذ فوري باي</span>
-                  <span className="text-[9px] text-amber-700">كود دفع مرجعي</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Official Gateway Transfer Instructions & Details */}
+            {/* Official Gateway Channels & Live Paymob Checkout */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-3">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-800 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>{t('بيانات بوابة التحويل الإلكتروني المعتمدة للمنصة:', 'Official Platform Gateway Information:')}</span>
+                  <span>{t('بوابة الدفع الإلكتروني المصرية المعتمدة (Paymob):', 'Official Egyptian Payment Gateway (Paymob):')}</span>
                 </span>
                 <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-100/60 px-2 py-0.5 rounded-full">
-                  {t('حساب تجاري رسمي', 'Official Account')}
+                  {t('حساب تجاري رسمي', 'Official Merchant')}
                 </span>
               </div>
 
-              {paymentMethod === 'instapay' && (
-                <div className="p-3 bg-white border border-emerald-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block">{t('معرف إنستاباي المعتمد (IPA):', 'Platform InstaPay IPA:')}</span>
-                      <span className="font-mono font-bold text-sm text-slate-900 select-all">meftahmisr@instapay</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy('meftahmisr@instapay', 'instapay')}
-                      className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-[11px] flex items-center gap-1 border border-emerald-200 transition-colors"
-                    >
-                      {copiedKey === 'instapay' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'instapay' ? t('تم النسخ', 'Copied') : t('نسخ المعرف', 'Copy IPA')}</span>
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    {t(
-                      'افتح تطبيق InstaPay على هاتفك وأرسل المبلغ لمعرف المنصة meftahmisr@instapay ثم التقط سكرين شوت للإيصال وارفعه بالأسفل.',
-                      'Send via InstaPay app to meftahmisr@instapay then upload the transfer confirmation screenshot below.'
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {paymentMethod === 'mobile_wallet' && (
-                <div className="p-3 bg-white border border-rose-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block">{t('رقم محفظة كاش المعتمد (فودافون/أورنج/اتصالات/وي):', 'Cash Wallet Mobile:')}</span>
-                      <span className="font-mono font-bold text-sm text-slate-900 select-all">01012345678</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy('01012345678', 'wallet')}
-                      className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-[11px] flex items-center gap-1 border border-rose-200 transition-colors"
-                    >
-                      {copiedKey === 'wallet' ? <Check className="w-3.5 h-3.5 text-rose-600" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'wallet' ? t('تم النسخ', 'Copied') : t('نسخ الرقم', 'Copy Number')}</span>
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    {t(
-                      'حوّل المبلغ من أي محفظة هاتف محمول إلى رقم المنصة أعلاه، ثم التقط سكرين شوت لرسالة تأكيد التحويل وارفعها بالأسفل.',
-                      'Transfer to platform cash number above, then upload the confirmation SMS/screen below.'
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {paymentMethod === 'card_meeza' && (
-                <div className="p-3 bg-white border border-blue-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block">{t('بوابة ميزة الإلكترونية والبطاقات البنكية:', 'Meeza & Bank Cards Gateway:')}</span>
-                      <span className="font-mono font-bold text-xs text-blue-900">MEZ-EGYPT-GATEWAY-2026</span>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    {t(
-                      'ادفع عبر بوابة الدفع الإلكتروني الوطنية (بطاقات ميزة، فيزا، أو ماستركارد)، ثم ارفع سكرين شوت إشعار الخصم لتأكيد العملية.',
-                      'Pay via national Meeza or bank card gateway, then upload the electronic transaction receipt below.'
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {paymentMethod === 'fawry' && (
-                <div className="p-3 bg-white border border-amber-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] text-slate-500 block">{t('كود الخدمة المعتمد لدى فوري باي:', 'Fawry Pay Merchant Service Code:')}</span>
-                      <span className="font-mono font-bold text-sm text-slate-900 select-all">982 410 721</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy('982410721', 'fawry')}
-                      className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] flex items-center gap-1 border border-amber-200 transition-colors"
-                    >
-                      {copiedKey === 'fawry' ? <Check className="w-3.5 h-3.5 text-amber-600" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'fawry' ? t('تم النسخ', 'Copied') : t('نسخ الكود', 'Copy Code')}</span>
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    {t(
-                      'ادفع في أقرب منفذ أو كشك فوري برقم الخدمة أعلاه، ثم صور إيصال السداد الورقي المطبوع وارفعه بالأسفل.',
-                      'Pay at any Fawry kiosk with code above, then capture photo of paper receipt and upload below.'
-                    )}
-                  </p>
-                </div>
-              )}
+              {/* Real Paymob Payment Gateway for All Egyptian Wallets & Cards */}
+              <PaymobGatewayBox
+                purpose="wallet_deposit"
+                amountEgp={effectiveAmount}
+                selectedMethod={
+                  paymentMethod === 'wallet_balance'
+                    ? 'instapay'
+                    : (paymentMethod as GatewayPaymentMethod)
+                }
+                onSelectMethod={(m) => setPaymentMethod(m)}
+                userId={currentUserUid}
+                userName={currentUserDisplayName}
+                userPhone={mobileWalletNumber}
+                onReferenceReady={(ref) => {
+                  setInstapayHandle(ref);
+                }}
+              />
 
               {/* Sender Details Input */}
               <div>

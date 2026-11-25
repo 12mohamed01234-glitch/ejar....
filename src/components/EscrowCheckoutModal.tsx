@@ -53,6 +53,8 @@ import {
 } from '../lib/validation';
 import { createSupabaseBooking } from '../lib/supabase';
 import { useI18n } from '../lib/i18n';
+import { PaymobGatewayBox } from './PaymobGatewayBox';
+import { GatewayPaymentMethod } from '../lib/payments';
 
 interface EscrowCheckoutModalProps {
   apartment: ApartmentRecord | null;
@@ -1336,91 +1338,22 @@ export const EscrowCheckoutModal: React.FC<EscrowCheckoutModalProps> = ({
                   </div>
                 )}
 
-                {paymentMethod === 'card_meeza' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="sm:col-span-3">
-                      <label className="block text-xs text-slate-600 mb-1">
-                        {t('رقم البطاقة البنكية', 'Card Number')}
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        dir="ltr"
-                        required
-                        value={cardNumber}
-                        onKeyDown={(e) => e.stopPropagation()}
-                        onChange={(e) => setCardNumber(normalizeArabicDigits(e.target.value))}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono tabular-nums text-start"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs text-slate-600 mb-1">
-                        {t('تاريخ الانتهاء', 'Expiry (MM/YY)')}
-                      </label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        dir="ltr"
-                        required
-                        value={cardExpiry}
-                        onKeyDown={(e) => e.stopPropagation()}
-                        onChange={(e) => setCardExpiry(normalizeArabicDigits(e.target.value))}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono tabular-nums text-start"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-600 mb-1">CVV</label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        dir="ltr"
-                        required
-                        value={cardCvv}
-                        onKeyDown={(e) => e.stopPropagation()}
-                        onChange={(e) =>
-                          setCardCvv(normalizeNumericInput(e.target.value).slice(0, 4))
-                        }
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono tabular-nums text-start"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {paymentMethod === 'instapay' && (
-                  <div>
-                    <label className="block text-xs text-slate-600 mb-1">
-                      {t('عنوان الدفع الفوري (IPA)', 'InstaPay Address (IPA)')}
-                    </label>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      required
-                      value={instapayHandle}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      onChange={(e) => setInstapayHandle(normalizeArabicDigits(e.target.value))}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono text-start"
-                    />
-                  </div>
-                )}
-
-                {paymentMethod === 'mobile_wallet' && (
-                  <div>
-                    <label className="block text-xs text-slate-600 mb-1">
-                      {t('رقم المحفظة الإلكترونية المصرية', 'Egyptian Mobile Wallet Number')}
-                    </label>
-                    <input
-                      type="tel"
-                      inputMode="tel"
-                      dir="ltr"
-                      required
-                      value={walletPhone}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      onChange={(e) =>
-                        setWalletPhone(normalizeNumericInput(e.target.value).slice(0, 11))
-                      }
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono tabular-nums text-start"
-                    />
-                  </div>
+                {paymentMethod !== 'wallet_balance' && (
+                  <PaymobGatewayBox
+                    purpose="booking"
+                    amountEgp={Math.round(totalRentEgp)}
+                    selectedMethod={paymentMethod as GatewayPaymentMethod}
+                    onSelectMethod={(m) => setPaymentMethod(m)}
+                    userId={currentUser?.uid}
+                    userEmail={currentUser?.email}
+                    userName={currentUser?.displayName}
+                    userPhone={walletPhone}
+                    apartmentId={apartment.id}
+                    apartmentTitle={apartment.title}
+                    onReferenceReady={(ref) => {
+                      setOtpCode(ref);
+                    }}
+                  />
                 )}
 
                 <button
