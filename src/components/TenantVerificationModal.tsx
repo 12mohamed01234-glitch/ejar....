@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { normalizeNumericInput } from '../lib/validation';
+import { uploadSupabaseDataUrl, uploadSupabaseFile } from '../lib/supabase';
 
 export interface TenantVerificationData {
   fullName: string;
@@ -72,6 +73,7 @@ export const TenantVerificationModal: React.FC<TenantVerificationModalProps> = (
   // ── Step 3: ID Card Upload ─────────────────────────────────────────────
   const [idPhotoUrl, setIdPhotoUrl] = useState<string | null>(existingData?.idCardPhotoUrl || null);
   const [idPhotoFile, setIdPhotoFile] = useState<File | null>(null);
+  const [isUploadingId, setIsUploadingId] = useState(false);
   const idInputRef = useRef<HTMLInputElement | null>(null);
 
   // ── Step 4: Liveness Camera ────────────────────────────────────────────
@@ -208,20 +210,34 @@ export const TenantVerificationModal: React.FC<TenantVerificationModalProps> = (
     setStep('id_upload');
   };
 
-  // ───── Step 3: ID Upload ──────────────────────────────────────────────
-  const handleIdFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ───── Step 3: ID Upload to Supabase Storage (kyc-documents) ─────────
+  const handleIdFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
       setErrorMsg(t('الملف كبير جداً. الحد الأقصى 10 ميجا', 'File too large. Max 10 MB'));
       return;
     }
-    setIdPhotoFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setIdPhotoUrl(ev.target?.result as string ?? null);
-    };
-    reader.readAsDataURL(file);
+    setErrorMsg(null);
+    setIsUploadingId(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const cleanId = (currentUserUid || nationalId.trim() || 'tenant').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filePath = `kyc/${cleanId}_id_${Date.now()}.${ext}`;
+      const { publicUrl } = await uploadSupabaseFile('kyc-documents', filePath, file);
+      setIdPhotoFile(file);
+      setIdPhotoUrl(publicUrl);
+    } catch (err) {
+      console.error('[TenantVerificationModal] ID card upload failed:', err);
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : t('تعذر رفع صورة البطاقة إلى Supabase Storage', 'Failed to upload ID card to Supabase Storage')
+      );
+    } finally {
+      setIsUploadingId(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleIdUploadNext = () => {
@@ -257,21 +273,38 @@ export const TenantVerificationModal: React.FC<TenantVerificationModalProps> = (
   const handleCompleteVerification = async () => {
     if (matchResult !== 'matched') return;
     setIsSubmitting(true);
+    setErrorMsg(null);
     try {
+      let uploadedSelfieUrl = capturedSelfie;
+      if (capturedSelfie && capturedSelfie.startsWith('data:')) {
+        const cleanId = (currentUserUid || nationalId.trim() || 'tenant').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const { publicUrl } = await uploadSupabaseDataUrl(
+          'kyc-documents',
+          `kyc/${cleanId}_selfie_${Date.now()}.jpg`,
+          capturedSelfie
+        );
+        uploadedSelfieUrl = publicUrl;
+      }
+
       const record: TenantVerificationData = {
         fullName: fullName.trim(),
         nationalId: nationalId.trim(),
         phone: phone.trim(),
         governorate,
         idCardPhotoUrl: idPhotoUrl,
-        selfiePhotoUrl: capturedSelfie,
+        selfiePhotoUrl: uploadedSelfieUrl,
         facialMatchScore: matchScore,
         verifiedAtMs: Date.now(),
       };
       await onComplete(record);
       setStep('success');
-    } catch {
-      setErrorMsg(t('حدث خطأ أثناء حفظ التوثيق، يرجى المحاولة مرة أخرى', 'Verification save failed, please retry'));
+    } catch (err) {
+      console.error('[TenantVerificationModal] Verification upload/save failed:', err);
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : t('حدث خطأ أثناء رفع أو حفظ التوثيق، يرجى المحاولة مرة أخرى', 'Verification upload/save failed, please retry')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -560,13 +593,15 @@ export const TenantVerificationModal: React.FC<TenantVerificationModalProps> = (
                   </div>
                 ) : (
                   <div
-                    onClick={() => idInputRef.current?.click()}
+                    onClick={() => !isUploadingId && idInputRef.current?.click()}
                     className="h-36 border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer bg-slate-50/60 hover:bg-emerald-50/20 transition-all"
                   >
                     <Upload className="w-7 h-7 text-emerald-600" />
                     <div className="text-center">
                       <p className="text-xs font-bold text-slate-800">
-                        {t('اضغط لرفع صورة البطاقة', 'Tap to upload ID card photo')}
+                        {isUploadingId
+                          ? t('جاري رفع البطاقة إلى التخزين السحابي...', 'Uploading ID to cloud storage...')
+                          : t('اضغط لرفع صورة البطاقة', 'Tap to upload ID card photo')}
                       </p>
                       <p className="text-[10px] text-slate-400 mt-0.5">
                         {t('JPG أو PNG – الحد الأقصى 10 ميجابايت', 'JPG or PNG – max 10 MB')}

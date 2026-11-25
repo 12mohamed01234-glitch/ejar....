@@ -25,6 +25,7 @@ interface PaymobGatewayBoxProps {
   amountEgp: number;
   selectedMethod: GatewayPaymentMethod;
   onSelectMethod: (method: GatewayPaymentMethod) => void;
+  hideChannelSelector?: boolean;
   userId?: string | null;
   userEmail?: string | null;
   userName?: string | null;
@@ -39,6 +40,7 @@ export const PaymobGatewayBox: React.FC<PaymobGatewayBoxProps> = ({
   amountEgp,
   selectedMethod,
   onSelectMethod,
+  hideChannelSelector = false,
   userId,
   userEmail,
   userName,
@@ -156,37 +158,39 @@ export const PaymobGatewayBox: React.FC<PaymobGatewayBoxProps> = ({
   ];
 
   return (
-    <div className="space-y-3.5">
-      {/* Channels Selector */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {channels.map((ch) => {
-          const Icon = ch.icon;
-          const active = selectedMethod === ch.id;
-          return (
-            <button
-              key={ch.id}
-              type="button"
-              onClick={() => {
-                onSelectMethod(ch.id);
-                setGatewayResp(null);
-                setGatewayError(null);
-              }}
-              className={`p-3 rounded-xl border text-start transition-all flex flex-col gap-1 min-h-[76px] ${
-                active
-                  ? 'bg-blue-50 border-blue-700 ring-2 ring-blue-600/20 shadow-2xs'
-                  : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-1">
-                <Icon className={`w-4 h-4 ${ch.accent}`} />
-                {active && <CheckCircle2 className="w-3.5 h-3.5 text-blue-700" />}
-              </div>
-              <span className="text-xs font-bold text-slate-900 leading-tight">{ch.label}</span>
-              <span className="text-[10px] text-slate-500 leading-tight">{ch.sublabel}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div className="space-y-3">
+      {/* Channels Selector (hidden when parent modal provides a unified selector) */}
+      {!hideChannelSelector && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {channels.map((ch) => {
+            const Icon = ch.icon;
+            const active = selectedMethod === ch.id;
+            return (
+              <button
+                key={ch.id}
+                type="button"
+                onClick={() => {
+                  onSelectMethod(ch.id);
+                  setGatewayResp(null);
+                  setGatewayError(null);
+                }}
+                className={`p-3 rounded-xl border text-start transition-all flex flex-col gap-1 min-h-[76px] ${
+                  active
+                    ? 'bg-blue-50 border-blue-700 ring-2 ring-blue-600/20 shadow-2xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <Icon className={`w-4 h-4 ${ch.accent}`} />
+                  {active && <CheckCircle2 className="w-3.5 h-3.5 text-blue-700" />}
+                </div>
+                <span className="text-xs font-bold text-slate-900 leading-tight">{ch.label}</span>
+                <span className="text-[10px] text-slate-500 leading-tight">{ch.sublabel}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Wallet Phone Input when Mobile Wallet selected */}
       {selectedMethod === 'mobile_wallet' && (

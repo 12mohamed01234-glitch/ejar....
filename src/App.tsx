@@ -889,6 +889,22 @@ export function App() {
   const handleCompleteLandlordKyc = useCallback(
     async (record: LandlordVerificationRecord) => {
       setMyLandlordVerification(record);
+      const activeUid = userAccountData?.uid || currentUser?.uid;
+      if (activeUid) {
+        try {
+          await updateSupabaseKycStatus(activeUid, {
+            isLandlordVerified: true,
+            nationalIdNumber: record.nationalIdNumber,
+            nationalIdFrontUrl: record.nationalIdFrontUrl,
+            nationalIdBackUrl: record.nationalIdBackUrl,
+            ownershipDocUrl: record.ownershipDocUrl,
+            facialLivenessVerified: true,
+            facialMatchScore: record.facialMatchScore,
+          });
+        } catch (sbErr) {
+          console.error('[App] Failed to persist landlord KYC URLs to Supabase:', sbErr);
+        }
+      }
       if (currentUser && sessionTokenReady) {
         try {
           await setDoc(doc(db, 'landlordVerifications', currentUser.uid), {
@@ -901,7 +917,7 @@ export function App() {
       }
       showToast('تهانينا! تم اعتماد توثيق هويتك وسند الملكية ومنح الشارة الموثقة');
     },
-    [currentUser, sessionTokenReady, showToast]
+    [currentUser, userAccountData?.uid, sessionTokenReady, showToast]
   );
 
   const handleTriggerAccountBan = useCallback(
@@ -3371,6 +3387,19 @@ export function App() {
                   const activeUid = currentUser?.uid || userAccountData?.uid;
                   if (activeUid) {
                     try {
+                      await updateSupabaseKycStatus(activeUid, {
+                        nationalIdNumber: data.nationalId,
+                        nationalIdFrontUrl: data.idFrontPhotoUrl || undefined,
+                        nationalIdBackUrl: data.idBackPhotoUrl || undefined,
+                        ownershipDocUrl: data.selfiePhotoUrl || undefined,
+                        facialLivenessVerified: Boolean(data.selfiePhotoUrl),
+                        facialMatchScore: data.facialMatchScore,
+                      });
+                    } catch (sbErr) {
+                      console.error('[App] Failed to save KYC URLs to Supabase profiles:', sbErr);
+                      throw sbErr;
+                    }
+                    try {
                       await setDoc(doc(db, 'tenantVerifications', activeUid), {
                         userId: activeUid,
                         tenantDisplayName: data.fullName || userAccountData?.displayName || 'مستأجر',
@@ -3379,6 +3408,9 @@ export function App() {
                         reviewNote: 'طلب توثيق هوية عبر الكاميرا والبطاقة (في انتظار اعتماد العلامة الزرقاء)',
                         nationalId: data.nationalId,
                         phone: data.phone,
+                        idFrontPhotoUrl: data.idFrontPhotoUrl,
+                        idBackPhotoUrl: data.idBackPhotoUrl,
+                        selfiePhotoUrl: data.selfiePhotoUrl,
                         facialMatchScore: data.facialMatchScore,
                         submittedAt: serverTimestamp(),
                         updatedAt: serverTimestamp(),
@@ -3779,6 +3811,22 @@ export function App() {
             existingData={myTenantVerificationData}
             onClose={() => setIsTenantVerificationModalOpen(false)}
             onComplete={async (data) => {
+              const activeUid = currentUser?.uid || userAccountData?.uid;
+              if (activeUid) {
+                try {
+                  await updateSupabaseKycStatus(activeUid, {
+                    isTenantVerified: true,
+                    nationalIdNumber: data.nationalId,
+                    nationalIdFrontUrl: data.idCardPhotoUrl || undefined,
+                    ownershipDocUrl: data.selfiePhotoUrl || undefined,
+                    facialLivenessVerified: Boolean(data.selfiePhotoUrl),
+                    facialMatchScore: data.facialMatchScore,
+                  });
+                } catch (sbErr) {
+                  console.error('[App] Failed to persist tenant KYC URLs to Supabase:', sbErr);
+                  throw sbErr;
+                }
+              }
               setMyTenantVerificationData(data);
               if (userAccountData) {
                 const nextUser = { ...userAccountData, isTenantVerified: true };

@@ -115,81 +115,129 @@ export async function compressImageBlob(
   });
 }
 
-/**
- * Universal Supabase Storage Upload Helper
- * Automatically compresses images, supports videos without corruption,
- * uploads to the given bucket, and returns its public CDN URL.
- * Falls back gracefully to the lightweight compressed Data URL if the bucket is not created or inaccessible.
- */
-export async function uploadSupabaseFile(
-  bucket: string,
-  filePath: string,
-  file: File | Blob
-): Promise<{ publicUrl: string; error: string | null; isFallback: boolean }> {
-  try {
-    let cleanPath = filePath.replace(/^\/+/, '');
-    // Strip leading bucket name if caller passed bucket in the path
-    if (cleanPath.startsWith(bucket + '/')) {
-      cleanPath = cleanPath.slice(bucket.length + 1);
-    }
+export const STORAGE_BUCKETS = {
+  APARTMENTS: 'apartments',
+  AVATARS: 'avatars',
+  KYC_DOCUMENTS: 'kyc-documents',
+} as const;
+export type StorageBucketName = (typeof STORAGE_BUCKETS)[keyof typeof STORAGE_BUCKETS];
 
-    const fileName = file instanceof File ? file.name : '';
-    const isVideo = (file.type && file.type.startsWith('video/')) ||
-      /\.(mp4|webm|ogg|mov|mkv|avi|m4v)$/i.test(fileName);
-
-    let uploadBlob: Blob = file;
-    let dataUrl = '';
-    let contentType = file.type || (isVideo ? 'video/mp4' : 'image/jpeg');
-
-    if (!isVideo) {
-      const compressed = await compressImageBlob(file);
-      uploadBlob = compressed.blob;
-      dataUrl = compressed.dataUrl;
-      contentType = 'image/jpeg';
-    } else {
-      dataUrl = await blobToDataUrl(file);
-    }
-
-    const { error } = await supabase.storage
-      .from(bucket)
-      .upload(cleanPath, uploadBlob, {
-        upsert: true,
-        contentType,
-      });
-
-    if (error) {
-      console.warn(`[Supabase Storage] Upload notice for bucket "${bucket}":`, error.message);
-      return {
-        publicUrl: dataUrl,
-        error: error.message,
-        isFallback: true,
-      };
-    }
-
-    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(cleanPath);
-    return {
-      publicUrl: urlData.publicUrl,
-      error: null,
-      isFallback: false,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Upload failed';
-    const fallbackUrl = await blobToDataUrl(file);
-    return {
-      publicUrl: fallbackUrl,
-      error: msg,
-      isFallback: true,
-    };
-  }
+export interface UploadStorageOptions {
+  maxWidth?: number;
+  maxHeight?: number;
+  quality?: number;
+  contentType?: string;
 }
 
-function blobToDataUrl(blob: Blob | File): Promise<string> {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => resolve('');
-    reader.readAsDataURL(blob);
-  });
+/**
+ * Converts a Base64 Data URL (e.g. webcam canvas capture) to a binary Blob
+ * so it can be uploaded directly to Supabase Storage.
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const parts = dataUrl.split(',');
+  if (parts.length !== 2) {
+    throw new Error('صيغة الصورة المؤقتة غير صالحة للرفع');
+  }
+  const mimeMatch = parts[0].match(/:(.*?);/);
+  const mimeType = mimeMatch?.[1] || 'image/jpeg';
+  const binary = atob(parts[1]);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
+/**
+ * Universal Supabase Storage Upload Helper
+ * Uploads images (compressed), videos, or PDFs directly to Supabase Storage
+ * and returns the real public CDN URL via getPublicUrl.
+ * Throws a descriptive error (and logs to console.error) if upload fails — never silently falls back to Base64.
+ */
+export async function uploadSupabaseFile(
+  bucket: StorageBucketName | string,
+  filePath: string,
+  file: File | Blob,
+  options?: UploadStorageOptions
+): Promise<{ publicUrl: string; path: string; error: null; isFallback: false }> {
+  let cleanPath = filePath.replace(/^\/+/, '');
+  if (cleanPath.startsWith(bucket + '/')) {
+    cleanPath = cleanPath.slice(bucket.length + 1);
+  }
+
+  if (!file || file.size === 0) {
+    const emptyErr = new Error('الملف المختار فارغ ولا يمكن رفعه.');
+    console.error('[Supabase Storage Upload Error]', { bucket, cleanPath, error: emptyErr });
+    throw emptyErr;
+  }
+
+  const fileName = file instanceof File ? file.name : '';
+  const mime = (options?.contentType || file.type || '').toLowerCase();
+  const isVideo =
+    mime.startsWith('video/') || /\.(mp4|webm|ogg|mov|mkv|avi|m4v)$/i.test(fileName);
+  const isPdfOrDoc =
+    mime === 'application/pdf' || /\.(pdf|doc|docx)$/i.test(fileName);
+  const isSvg = mime.includes('svg') || /\.svg$/i.test(fileName);
+  const isRasterImage =
+    !isVideo &&
+    !isPdfOrDoc &&
+    !isSvg &&
+    (mime.startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|heic|avif)$/i.test(fileName));
+
+  let uploadBlob: Blob = file;
+  let contentType = mime || (isVideo ? 'video/mp4' : isPdfOrDoc ? 'application/pdf' : 'application/octet-stream');
+
+  if (isRasterImage) {
+    const compressed = await compressImageBlob(
+      file,
+      options?.maxWidth ?? 1400,
+      options?.maxHeight ?? 1400,
+      options?.quality ?? 0.8
+    );
+    uploadBlob = compressed.blob;
+    contentType = compressed.blob.type || 'image/jpeg';
+  }
+
+  const { data: uploadData, error } = await supabase.storage
+    .from(bucket)
+    .upload(cleanPath, uploadBlob, {
+      cacheControl: '3600',
+      upsert: true,
+      contentType,
+    });
+
+  if (error) {
+    console.error(`[Supabase Storage Upload Failed] bucket="${bucket}", path="${cleanPath}":`, error);
+    throw new Error(`فشل رفع الملف إلى Supabase Storage (${bucket}): ${error.message}`);
+  }
+
+  const storedPath = uploadData?.path || cleanPath;
+  const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(storedPath);
+  if (!urlData?.publicUrl) {
+    const urlError = new Error(`تعذر استخراج الرابط العام للملف المرفوع في (${bucket})`);
+    console.error('[Supabase Storage getPublicUrl Error]', { bucket, storedPath, urlError });
+    throw urlError;
+  }
+
+  return {
+    publicUrl: urlData.publicUrl,
+    path: storedPath,
+    error: null,
+    isFallback: false,
+  };
+}
+
+/**
+ * Uploads a Base64 data URL (such as a webcam selfie snapshot) directly to Supabase Storage.
+ */
+export async function uploadSupabaseDataUrl(
+  bucket: StorageBucketName | string,
+  filePath: string,
+  dataUrl: string,
+  options?: UploadStorageOptions
+): Promise<{ publicUrl: string; path: string; error: null; isFallback: false }> {
+  const blob = dataUrlToBlob(dataUrl);
+  return uploadSupabaseFile(bucket, filePath, blob, options);
 }
 
 export type SupabaseConnectionStatus = 'connected' | 'needs_tables' | 'offline';
@@ -495,6 +543,7 @@ export async function createSupabaseApartment(record: ApartmentRecord): Promise<
     image_key: record.imageKey,
     image_url: record.imageUrl || record.imageUrls?.[0] || null,
     has_virtual_tour: record.hasVirtualTour,
+    virtual_tour_url: record.virtualTourUrl || record.panorama360DataUrl || null,
     panorama_360_key: record.panorama360Key || 'none',
     verification_status: record.verificationStatus,
     availability_status: record.availabilityStatus,

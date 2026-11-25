@@ -228,3 +228,24 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
+
+-- 6. ENSURE GALLERY COLUMN & STORAGE BUCKETS/POLICIES EXIST
+ALTER TABLE public.apartments ADD COLUMN IF NOT EXISTS image_urls TEXT[] DEFAULT '{}';
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('apartments', 'apartments', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('kyc-documents', 'kyc-documents', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Public Upload Apartments" ON storage.objects;
+CREATE POLICY "Public Upload Apartments" ON storage.objects
+  FOR ALL TO anon, authenticated
+  USING (bucket_id IN ('apartments', 'avatars', 'kyc-documents'))
+  WITH CHECK (bucket_id IN ('apartments', 'avatars', 'kyc-documents'));

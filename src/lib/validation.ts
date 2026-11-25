@@ -231,10 +231,21 @@ export const PANORAMA_360_PRESETS: Record<
   },
 };
 
-export function resolveApartmentPanoramaSrc(apt: Pick<ApartmentRecord, 'hasVirtualTour' | 'panorama360DataUrl' | 'panorama360Key'>): string | null {
+export function resolveApartmentPanoramaSrc(apt: Pick<ApartmentRecord, 'hasVirtualTour' | 'panorama360DataUrl' | 'panorama360Key' | 'virtualTourUrl'>): string | null {
   if (!apt.hasVirtualTour) return null;
-  if (apt.panorama360DataUrl && apt.panorama360DataUrl.startsWith('data:image/')) {
+  if (
+    apt.panorama360DataUrl &&
+    (apt.panorama360DataUrl.startsWith('https://') ||
+      apt.panorama360DataUrl.startsWith('http://') ||
+      apt.panorama360DataUrl.startsWith('data:image/'))
+  ) {
     return apt.panorama360DataUrl;
+  }
+  if (
+    apt.virtualTourUrl &&
+    (apt.virtualTourUrl.startsWith('https://') || apt.virtualTourUrl.startsWith('http://'))
+  ) {
+    return apt.virtualTourUrl;
   }
   if (apt.panorama360Key && apt.panorama360Key !== 'none') {
     return PANORAMA_360_PRESETS[apt.panorama360Key]?.src ?? panorama360CairoImg;

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import { normalizeNumericInput } from '../lib/validation';
-import { uploadSupabaseFile } from '../lib/supabase';
+import { uploadSupabaseDataUrl, uploadSupabaseFile } from '../lib/supabase';
 
 export interface KycVerificationData {
   fullName: string;
@@ -52,6 +52,7 @@ const GOVERNORATES = [
 ];
 
 export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({
+  currentUserUid,
   currentUserDisplayName,
   existingData,
   onComplete,
@@ -215,14 +216,19 @@ export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({
     setErrorMsg(null);
     setIsUploadingId(true);
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
-      const cleanId = (nationalId.trim() || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const cleanId = (currentUserUid || nationalId.trim() || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
       const filePath = `kyc/${cleanId}_${side}_${Date.now()}.${ext}`;
       const { publicUrl } = await uploadSupabaseFile('kyc-documents', filePath, file);
       if (side === 'front') setIdFrontUrl(publicUrl);
       else setIdBackUrl(publicUrl);
-    } catch {
-      setErrorMsg(t('تعذر رفع الصورة، يرجى المحاولة ثانية', 'Upload failed, please retry'));
+    } catch (err) {
+      console.error('[KycVerificationPage] ID upload failed:', err);
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : t('تعذر رفع الصورة إلى Supabase Storage، يرجى المحاولة ثانية', 'Upload to Supabase Storage failed, please retry')
+      );
     } finally {
       setIsUploadingId(false);
     }
@@ -242,7 +248,19 @@ export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({
   const handleCompleteVerification = async () => {
     if (matchResult !== 'matched') return;
     setIsSubmitting(true);
+    setErrorMsg(null);
     try {
+      let uploadedSelfieUrl = capturedSelfie;
+      if (capturedSelfie && capturedSelfie.startsWith('data:')) {
+        const cleanId = (currentUserUid || nationalId.trim() || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const { publicUrl } = await uploadSupabaseDataUrl(
+          'kyc-documents',
+          `kyc/${cleanId}_selfie_${Date.now()}.jpg`,
+          capturedSelfie
+        );
+        uploadedSelfieUrl = publicUrl;
+      }
+
       const record: KycVerificationData = {
         fullName: fullName.trim(),
         nationalId: nationalId.trim(),
@@ -250,15 +268,20 @@ export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({
         governorate,
         idFrontPhotoUrl: idFrontUrl,
         idBackPhotoUrl: idBackUrl,
-        selfiePhotoUrl: capturedSelfie,
+        selfiePhotoUrl: uploadedSelfieUrl,
         facialMatchScore: matchScore,
         submittedAtMs: Date.now(),
         status: 'pending_review',
       };
       await onComplete(record);
       setStep('submitted');
-    } catch {
-      setErrorMsg(t('حدث خطأ أثناء حفظ التوثيق، يرجى المحاولة مرة أخرى', 'Verification save failed, please retry'));
+    } catch (err) {
+      console.error('[KycVerificationPage] Verification save/upload failed:', err);
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : t('حدث خطأ أثناء رفع أو حفظ التوثيق، يرجى المحاولة مرة أخرى', 'Verification upload/save failed, please retry')
+      );
     } finally {
       setIsSubmitting(false);
     }

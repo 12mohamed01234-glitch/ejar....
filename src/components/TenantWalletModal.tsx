@@ -32,6 +32,7 @@ import {
   MIN_SERIOUSNESS_DEPOSIT_EGP,
 } from '../lib/validation';
 import { useI18n } from '../lib/i18n';
+import { uploadSupabaseFile } from '../lib/supabase';
 import { PaymobGatewayBox } from './PaymobGatewayBox';
 import { GatewayPaymentMethod } from '../lib/payments';
 
@@ -100,6 +101,7 @@ export const TenantWalletModal: React.FC<TenantWalletModalProps> = ({
 
   // Screenshot & Gateway State
   const [receiptScreenshot, setReceiptScreenshot] = useState<string | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewLightboxUrl, setPreviewLightboxUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -143,7 +145,7 @@ export const TenantWalletModal: React.FC<TenantWalletModalProps> = ({
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setUploadError(null);
     const file = e.target.files?.[0];
     if (!file) return;
@@ -151,11 +153,24 @@ export const TenantWalletModal: React.FC<TenantWalletModalProps> = ({
       setUploadError(t('يرجى اختيار ملف صورة صالح (PNG, JPG, JPEG)', 'Please choose a valid image file'));
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setReceiptScreenshot(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    setIsUploadingReceipt(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const cleanUid = (currentUserUid || 'wallet_user').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filePath = `receipts/${cleanUid}_${Date.now()}.${ext}`;
+      const { publicUrl } = await uploadSupabaseFile('kyc-documents', filePath, file);
+      setReceiptScreenshot(publicUrl);
+    } catch (err) {
+      console.error('[TenantWalletModal] Receipt upload failed:', err);
+      setUploadError(
+        err instanceof Error
+          ? err.message
+          : t('فشل رفع صورة الإيصال إلى التخزين السحابي.', 'Failed to upload receipt image to cloud storage.')
+      );
+    } finally {
+      setIsUploadingReceipt(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleUseMockReceipt = () => {
@@ -530,14 +545,16 @@ export const TenantWalletModal: React.FC<TenantWalletModalProps> = ({
                 </div>
               ) : (
                 <div
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => !isUploadingReceipt && fileInputRef.current?.click()}
                   className="p-5 bg-white hover:bg-blue-50/50 rounded-xl border border-slate-200 text-center cursor-pointer transition-colors space-y-1.5"
                 >
                   <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center mx-auto">
                     <Upload className="w-5 h-5" />
                   </div>
                   <div className="text-xs font-bold text-slate-900">
-                    {t('اضغط هنا لرفع سكرين شوت أو صورة الإيصال', 'Click to browse transfer screenshot / receipt')}
+                    {isUploadingReceipt
+                      ? t('جاري رفع صورة الإيصال إلى التخزين السحابي...', 'Uploading receipt to cloud storage...')
+                      : t('اضغط هنا لرفع سكرين شوت أو صورة الإيصال', 'Click to browse transfer screenshot / receipt')}
                   </div>
                   <p className="text-[11px] text-slate-500">
                     {t('يدعم صور PNG, JPG, JPEG أو سكرين شوت الموبايل', 'Supports mobile screenshots and camera photos')}

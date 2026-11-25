@@ -57,6 +57,7 @@ import {
 } from '../lib/validation';
 import { useI18n } from '../lib/i18n';
 import { ApartmentImage } from './ApartmentImage';
+import { updateSupabaseKycStatus, uploadSupabaseFile } from '../lib/supabase';
 
 interface MyContractsViewProps {
   currentUser: User | null;
@@ -579,6 +580,30 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
 
     setSubmittingKyc(true);
     try {
+      const cleanUid = currentUser.uid.replace(/[^a-zA-Z0-9_-]/g, '_');
+      let idCardUrl: string | undefined;
+      let supportingDocUrl: string | undefined;
+
+      if (idCardFile) {
+        const idExt = (idCardFile.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+        const uploadedId = await uploadSupabaseFile(
+          'kyc-documents',
+          `tenant_kyc/${cleanUid}_id_${Date.now()}.${idExt}`,
+          idCardFile
+        );
+        idCardUrl = uploadedId.publicUrl;
+      }
+
+      if (supportingDocFile) {
+        const supExt = (supportingDocFile.name.split('.').pop() || 'pdf').replace(/[^a-zA-Z0-9]/g, '') || 'pdf';
+        const uploadedSup = await uploadSupabaseFile(
+          'kyc-documents',
+          `tenant_kyc/${cleanUid}_support_${Date.now()}.${supExt}`,
+          supportingDocFile
+        );
+        supportingDocUrl = uploadedSup.publicUrl;
+      }
+
       const idHash = idCardFile
         ? await computeFileSha256(idCardFile)
         : await computeTextSha256(`${currentUser.uid}_id_${nationalIdNumber}`);
@@ -589,6 +614,14 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
       const idName = (idCardFile?.name || 'national_id_card.jpg').slice(0, 120);
       const supName = (supportingDocFile?.name || 'enrollment_or_hr_letter.pdf').slice(0, 120);
       const displayName = fullLegalName.trim().slice(0, 80);
+
+      if (idCardUrl || supportingDocUrl) {
+        await updateSupabaseKycStatus(currentUser.uid, {
+          nationalIdNumber: nationalIdNumber.trim(),
+          ...(idCardUrl ? { nationalIdFrontUrl: idCardUrl } : {}),
+          ...(supportingDocUrl ? { ownershipDocUrl: supportingDocUrl } : {}),
+        });
+      }
 
       const batch = writeBatch(db);
       const pubRef = doc(db, 'tenantVerifications', currentUser.uid);
@@ -626,8 +659,10 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
           occupationOrUniversity: occupationOrUniversity.trim().slice(0, 120),
           idCardFileName: idName.length >= 3 ? idName : 'id_card.jpg',
           idCardSha256: idHash,
+          ...(idCardUrl ? { idCardUrl } : {}),
           supportingDocFileName: supName.length >= 3 ? supName : 'proof.pdf',
           supportingDocSha256: supHash,
+          ...(supportingDocUrl ? { supportingDocUrl } : {}),
           updatedAt: serverTimestamp(),
         });
       } else {
@@ -638,8 +673,10 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
           occupationOrUniversity: occupationOrUniversity.trim().slice(0, 120),
           idCardFileName: idName.length >= 3 ? idName : 'id_card.jpg',
           idCardSha256: idHash,
+          ...(idCardUrl ? { idCardUrl } : {}),
           supportingDocFileName: supName.length >= 3 ? supName : 'proof.pdf',
           supportingDocSha256: supHash,
+          ...(supportingDocUrl ? { supportingDocUrl } : {}),
           updatedAt: serverTimestamp(),
         });
       }
@@ -652,16 +689,19 @@ export const MyContractsView: React.FC<MyContractsViewProps> = ({
         )
       );
     } catch (err) {
+      console.error('[MyContractsView] KYC upload/submit failed:', err);
       logFirestoreDiagnostic(
         err,
         OperationType.WRITE,
         `tenantVerifications/${currentUser.uid}`
       );
       setKycMessage(
-        t(
-          'تعذر إرسال بيانات توثيق الهوية حالياً. يرجى التأكد من البيانات وجلستك والمحاولة مرة أخرى.',
-          'Could not submit KYC documents right now. Please verify your entries and session, then retry.'
-        )
+        err instanceof Error && err.message
+          ? err.message
+          : t(
+              'تعذر إرسال بيانات توثيق الهوية حالياً. يرجى التأكد من البيانات وجلستك والمحاولة مرة أخرى.',
+              'Could not submit KYC documents right now. Please verify your entries and session, then retry.'
+            )
       );
     } finally {
       setSubmittingKyc(false);

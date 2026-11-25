@@ -22,6 +22,7 @@ import {
   normalizeArabicDigits,
 } from '../lib/validation';
 import { useI18n } from '../lib/i18n';
+import { uploadSupabaseDataUrl, uploadSupabaseFile } from '../lib/supabase';
 
 interface LandlordKycModalProps {
   isOpen: boolean;
@@ -78,6 +79,11 @@ export const LandlordKycModal: React.FC<LandlordKycModalProps> = ({
   const [deedType, setDeedType] = useState<'title_deed' | 'lease_contract' | 'power_of_attorney'>(
     existingVerification?.ownershipDocType || 'title_deed'
   );
+  const [isUploadingDoc, setIsUploadingDoc] = useState<boolean>(false);
+  const [docUploadError, setDocUploadError] = useState<string | null>(null);
+  const frontIdInputRef = useRef<HTMLInputElement | null>(null);
+  const backIdInputRef = useRef<HTMLInputElement | null>(null);
+  const deedInputRef = useRef<HTMLInputElement | null>(null);
 
   // Camera Facial Liveness
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -198,50 +204,97 @@ export const LandlordKycModal: React.FC<LandlordKycModalProps> = ({
     void startCamera();
   };
 
-  // Mock Upload Handlers
-  const handleSimulateIdFront = () => {
-    setNationalIdFront(
-      'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="190" viewBox="0 0 300 190"%3E%3Crect width="300" height="190" rx="12" fill="%23e2e8f0" stroke="%233b82f6" stroke-width="4"/%3E%3Ccircle cx="65" cy="85" r="35" fill="%2394a3b8"/%3E%3Crect x="120" y="55" width="150" height="14" rx="4" fill="%231e293b"/%3E%3Crect x="120" y="80" width="130" height="10" rx="3" fill="%2364748b"/%3E%3Crect x="120" y="100" width="100" height="10" rx="3" fill="%2364748b"/%3E%3Crect x="30" y="145" width="240" height="16" rx="4" fill="%230f172a"/%3E%3Ctext x="150" y="157" fill="%23ffffff" font-family="monospace" font-size="11" text-anchor="middle"%3E29508140102948%3C/text%3E%3C/svg%3E'
-    );
+  // Real Supabase Storage Upload Handlers (bucket: kyc-documents)
+  const uploadLandlordDocFile = async (
+    file: File,
+    docKey: 'id_front' | 'id_back' | 'deed',
+    onSuccessUrl: (url: string) => void
+  ) => {
+    setDocUploadError(null);
+    setIsUploadingDoc(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const cleanUid = (currentUserUid || nationalIdNumber || 'landlord').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filePath = `landlord_kyc/${cleanUid}_${docKey}_${Date.now()}.${ext}`;
+      const { publicUrl } = await uploadSupabaseFile('kyc-documents', filePath, file);
+      onSuccessUrl(publicUrl);
+    } catch (err) {
+      console.error(`[LandlordKycModal] Document upload failed (${docKey}):`, err);
+      setDocUploadError(
+        err instanceof Error
+          ? err.message
+          : t('فشل رفع المستند إلى التخزين السحابي.', 'Failed to upload document to cloud storage.')
+      );
+    } finally {
+      setIsUploadingDoc(false);
+    }
   };
 
-  const handleSimulateIdBack = () => {
-    setNationalIdBack(
-      'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="190" viewBox="0 0 300 190"%3E%3Crect width="300" height="190" rx="12" fill="%23e2e8f0" stroke="%233b82f6" stroke-width="4"/%3E%3Crect x="25" y="30" width="250" height="25" rx="3" fill="%23334155"/%3E%3Crect x="25" y="70" width="160" height="12" rx="3" fill="%2364748b"/%3E%3Crect x="25" y="90" width="140" height="12" rx="3" fill="%2364748b"/%3E%3Crect x="25" y="120" width="250" height="40" rx="4" fill="%2394a3b8"/%3E%3Ctext x="150" y="145" fill="%230f172a" font-family="monospace" font-size="11" text-anchor="middle"%3Eبطاقة تحقيق الشخصية - جمهورية مصر العربية%3C/text%3E%3C/svg%3E'
-    );
+  const handleIdFrontFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadLandlordDocFile(file, 'id_front', setNationalIdFront);
+    if (e.target) e.target.value = '';
   };
 
-  const handleSimulateDeed = () => {
-    setDeedDoc(
-      'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="190" viewBox="0 0 300 190"%3E%3Crect width="300" height="190" rx="12" fill="%23fef3c7" stroke="%23d97706" stroke-width="4"/%3E%3Ccircle cx="150" cy="50" r="22" fill="%23d97706"/%3E%3Crect x="40" y="90" width="220" height="12" rx="3" fill="%2378350f"/%3E%3Crect x="40" y="112" width="200" height="10" rx="3" fill="%2392400e"/%3E%3Crect x="40" y="130" width="180" height="10" rx="3" fill="%2392400e"/%3E%3Ctext x="150" y="165" fill="%2378350f" font-family="sans-serif" font-weight="bold" font-size="11" text-anchor="middle"%3Eعقد ملكية موثق بالشهر العقاري%3C/text%3E%3C/svg%3E'
-    );
+  const handleIdBackFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadLandlordDocFile(file, 'id_back', setNationalIdBack);
+    if (e.target) e.target.value = '';
+  };
+
+  const handleDeedFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadLandlordDocFile(file, 'deed', setDeedDoc);
+    if (e.target) e.target.value = '';
   };
 
   const handleSubmitFinalVerification = async () => {
     setIsSubmitting(true);
-    const record: LandlordVerificationRecord = {
-      uid: currentUserUid || 'current_user',
-      fullName,
-      nationalIdNumber,
-      ownerPhone,
-      governorate,
-      district,
-      status: 'verified',
-      nationalIdFrontUrl: nationalIdFront || undefined,
-      nationalIdBackUrl: nationalIdBack || undefined,
-      ownershipDocUrl: deedDoc || undefined,
-      ownershipDocType: deedType,
-      selfiePhotoUrl: capturedSelfie || undefined,
-      facialMatchScore: facialMatchScore || 98.6,
-      submittedAtMs: Date.now(),
-      verifiedAtMs: Date.now(),
-      badgeLabelAr: 'مالك موثق بالهوية والملكية والتحقق البيومتري',
-      badgeLabelEn: 'Biometrically & Deed Verified Landlord',
-    };
-
+    setDocUploadError(null);
     try {
+      let uploadedSelfieUrl = capturedSelfie || undefined;
+      if (capturedSelfie && capturedSelfie.startsWith('data:')) {
+        const cleanUid = (currentUserUid || nationalIdNumber || 'landlord').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const { publicUrl } = await uploadSupabaseDataUrl(
+          'kyc-documents',
+          `landlord_kyc/${cleanUid}_selfie_${Date.now()}.jpg`,
+          capturedSelfie
+        );
+        uploadedSelfieUrl = publicUrl;
+      }
+
+      const record: LandlordVerificationRecord = {
+        uid: currentUserUid || 'current_user',
+        fullName,
+        nationalIdNumber,
+        ownerPhone,
+        governorate,
+        district,
+        status: 'verified',
+        nationalIdFrontUrl: nationalIdFront || undefined,
+        nationalIdBackUrl: nationalIdBack || undefined,
+        ownershipDocUrl: deedDoc || undefined,
+        ownershipDocType: deedType,
+        selfiePhotoUrl: uploadedSelfieUrl,
+        facialMatchScore: facialMatchScore || 98.6,
+        submittedAtMs: Date.now(),
+        verifiedAtMs: Date.now(),
+        badgeLabelAr: 'مالك موثق بالهوية والملكية والتحقق البيومتري',
+        badgeLabelEn: 'Biometrically & Deed Verified Landlord',
+      };
+
       await onCompleteVerification(record);
       setCurrentStep('approved_badge');
+    } catch (err) {
+      console.error('[LandlordKycModal] Final verification upload/save failed:', err);
+      setDocUploadError(
+        err instanceof Error
+          ? err.message
+          : t('فشل رفع أو حفظ بيانات التوثيق.', 'Failed to upload or save verification data.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -329,6 +382,12 @@ export const LandlordKycModal: React.FC<LandlordKycModalProps> = ({
         )}
 
         <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto no-scrollbar">
+          {docUploadError && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{docUploadError}</span>
+            </div>
+          )}
           {/* STEP 1: Personal Info */}
           {currentStep === 'personal_info' && (
             <div className="space-y-4">
@@ -481,12 +540,24 @@ export const LandlordKycModal: React.FC<LandlordKycModalProps> = ({
                     </div>
                   )}
 
+                  <input
+                    ref={frontIdInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleIdFrontFileChange}
+                    className="hidden"
+                  />
                   <button
                     type="button"
-                    onClick={handleSimulateIdFront}
-                    className="w-full py-2 px-3 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
+                    disabled={isUploadingDoc}
+                    onClick={() => frontIdInputRef.current?.click()}
+                    className="w-full py-2 px-3 bg-white hover:bg-slate-100 disabled:opacity-60 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
                   >
-                    {nationalIdFront ? t('تغيير صورة الوجه', 'Change Front') : t('تحميل صورة وجه البطاقة', 'Upload ID Front')}
+                    {isUploadingDoc
+                      ? t('جاري الرفع...', 'Uploading...')
+                      : nationalIdFront
+                        ? t('تغيير صورة الوجه', 'Change Front')
+                        : t('تحميل صورة وجه البطاقة', 'Upload ID Front')}
                   </button>
                 </div>
 
@@ -514,12 +585,24 @@ export const LandlordKycModal: React.FC<LandlordKycModalProps> = ({
                     </div>
                   )}
 
+                  <input
+                    ref={backIdInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleIdBackFileChange}
+                    className="hidden"
+                  />
                   <button
                     type="button"
-                    onClick={handleSimulateIdBack}
-                    className="w-full py-2 px-3 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
+                    disabled={isUploadingDoc}
+                    onClick={() => backIdInputRef.current?.click()}
+                    className="w-full py-2 px-3 bg-white hover:bg-slate-100 disabled:opacity-60 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
                   >
-                    {nationalIdBack ? t('تغيير صورة الظهر', 'Change Back') : t('تحميل صورة ظهر البطاقة', 'Upload ID Back')}
+                    {isUploadingDoc
+                      ? t('جاري الرفع...', 'Uploading...')
+                      : nationalIdBack
+                        ? t('تغيير صورة الظهر', 'Change Back')
+                        : t('تحميل صورة ظهر البطاقة', 'Upload ID Back')}
                   </button>
                 </div>
               </div>
@@ -588,11 +671,18 @@ export const LandlordKycModal: React.FC<LandlordKycModalProps> = ({
 
                   {deedDoc ? (
                     <div className="relative rounded-xl overflow-hidden border border-amber-400 bg-white p-2">
-                      <img
-                        src={deedDoc}
-                        alt="Deed Document"
-                        className="w-full h-36 object-contain rounded-lg"
-                      />
+                      {/\.pdf(\?|$)/i.test(deedDoc) ? (
+                        <div className="w-full h-36 flex flex-col items-center justify-center gap-2 bg-amber-50 rounded-lg text-amber-900">
+                          <FileText className="w-8 h-8 text-amber-600" />
+                          <span className="text-xs font-bold">{t('تم رفع مستند PDF بنجاح', 'PDF Document Uploaded')}</span>
+                        </div>
+                      ) : (
+                        <img
+                          src={deedDoc}
+                          alt="Deed Document"
+                          className="w-full h-36 object-contain rounded-lg"
+                        />
+                      )}
                       <div className="absolute top-3 right-3 bg-amber-600 text-white text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 font-bold">
                         <CheckCircle2 className="w-3 h-3" />
                         <span>{t('تم التوثيق والمطابقة', 'Verified Deed')}</span>
@@ -605,12 +695,24 @@ export const LandlordKycModal: React.FC<LandlordKycModalProps> = ({
                     </div>
                   )}
 
+                  <input
+                    ref={deedInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={handleDeedFileChange}
+                    className="hidden"
+                  />
                   <button
                     type="button"
-                    onClick={handleSimulateDeed}
-                    className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
+                    disabled={isUploadingDoc}
+                    onClick={() => deedInputRef.current?.click()}
+                    className="w-full py-2.5 px-4 bg-white hover:bg-slate-100 disabled:opacity-60 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
                   >
-                    {deedDoc ? t('تغيير المستند المرفوع', 'Change Document') : t('تحميل صورة عقد الملكية', 'Upload Ownership Deed')}
+                    {isUploadingDoc
+                      ? t('جاري رفع المستند...', 'Uploading document...')
+                      : deedDoc
+                        ? t('تغيير المستند المرفوع', 'Change Document')
+                        : t('تحميل صورة أو PDF عقد الملكية', 'Upload Ownership Deed')}
                   </button>
                 </div>
               </div>

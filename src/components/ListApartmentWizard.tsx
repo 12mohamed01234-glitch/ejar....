@@ -56,10 +56,7 @@ import { useI18n } from '../lib/i18n';
 import { ApartmentImage } from './ApartmentImage';
 import { PaymobGatewayBox } from './PaymobGatewayBox';
 import { GatewayPaymentMethod } from '../lib/payments';
-import {
-  VirtualTour360Viewer,
-  compressPanoramaImageToDataUrl,
-} from './VirtualTour360Viewer';
+import { VirtualTour360Viewer } from './VirtualTour360Viewer';
 
 interface ListApartmentWizardProps {
   currentUser: User | null;
@@ -156,16 +153,14 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
       const newItems: Array<{ id: string; url: string; isCover: boolean }> = [];
       for (let i = 0; i < filesToUpload.length; i++) {
         const file = filesToUpload[i];
-        const ext = file.name.split('.').pop() || 'jpg';
+        const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
         const filePath = `apt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
         const { publicUrl } = await uploadSupabaseFile('apartments', filePath, file);
-        if (publicUrl) {
-          newItems.push({
-            id: `img_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 5)}`,
-            url: publicUrl,
-            isCover: customImages.length === 0 && i === 0,
-          });
-        }
+        newItems.push({
+          id: `img_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 5)}`,
+          url: publicUrl,
+          isCover: customImages.length === 0 && i === 0,
+        });
       }
 
       setCustomImages((prev) => {
@@ -179,7 +174,12 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
         setCustomImageUrl(newItems[0].url);
       }
     } catch (err) {
-      setCustomImageError(err instanceof Error ? err.message : 'فشل رفع الصور');
+      console.error('[ListApartmentWizard] Apartment photo upload failed:', err);
+      setCustomImageError(
+        err instanceof Error
+          ? err.message
+          : t('فشل رفع الصور إلى التخزين السحابي.', 'Failed to upload photos to cloud storage.')
+      );
     } finally {
       setIsUploadingCustomImage(false);
       if (e.target) e.target.value = '';
@@ -396,17 +396,27 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
     setErrorMsg(null);
     setCompressingPanorama(true);
     try {
-      const dataUrl = await compressPanoramaImageToDataUrl(file);
-      setPanorama360DataUrl(dataUrl);
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const filePath = `panoramas/pano_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
+      const { publicUrl } = await uploadSupabaseFile('apartments', filePath, file, {
+        maxWidth: 2048,
+        maxHeight: 2048,
+        quality: 0.82,
+      });
+      setPanorama360DataUrl(publicUrl);
+      setVirtualTourUrl(publicUrl);
       setPanoramaFileName(file.name);
       setPanoramaSourceMode('upload');
       setHasVirtualTour(true);
-    } catch {
+    } catch (err) {
+      console.error('[ListApartmentWizard] 360 panorama upload failed:', err);
       setErrorMsg(
-        t(
-          'تعذر معالجة صورة الجولة 360°. يرجى اختيار صورة JPEG أو PNG صالحة.',
-          'Could not process the 360° panorama image. Please choose a valid JPEG or PNG.'
-        )
+        err instanceof Error
+          ? err.message
+          : t(
+              'تعذر رفع صورة الجولة 360° إلى التخزين السحابي.',
+              'Could not upload the 360° panorama image to cloud storage.'
+            )
       );
     } finally {
       setCompressingPanorama(false);
@@ -568,6 +578,27 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
       const deedName = (titleDeedFile?.name || 'verified_title_deed.pdf').slice(0, 120);
       const utilityName = (utilityBillFile?.name || 'recent_utility_bill.pdf').slice(0, 120);
 
+      let titleDeedUrl: string | undefined;
+      let utilityBillUrl: string | undefined;
+      if (titleDeedFile) {
+        const deedExt = (titleDeedFile.name.split('.').pop() || 'pdf').replace(/[^a-zA-Z0-9]/g, '') || 'pdf';
+        const uploadedDeed = await uploadSupabaseFile(
+          'kyc-documents',
+          `apartments_kyc/${apartmentId}_deed_${Date.now()}.${deedExt}`,
+          titleDeedFile
+        );
+        titleDeedUrl = uploadedDeed.publicUrl;
+      }
+      if (utilityBillFile) {
+        const utilityExt = (utilityBillFile.name.split('.').pop() || 'pdf').replace(/[^a-zA-Z0-9]/g, '') || 'pdf';
+        const uploadedUtility = await uploadSupabaseFile(
+          'kyc-documents',
+          `apartments_kyc/${apartmentId}_utility_${Date.now()}.${utilityExt}`,
+          utilityBillFile
+        );
+        utilityBillUrl = uploadedUtility.publicUrl;
+      }
+
       const billingMode: BillingMode =
         category === 'hotel_room'
           ? 'daily_or_monthly'
@@ -623,7 +654,7 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
         imageKey,
         imageUrl: (customImages.find((img) => img.isCover)?.url || customImages[0]?.url || customImageUrl) || undefined,
         imageUrls: customImages.length > 0 ? customImages.map((img) => img.url) : (customImageUrl ? [customImageUrl] : undefined),
-        hasVirtualTour: false,
+        hasVirtualTour: Boolean(hasVirtualTour),
         verificationStatus,
         availabilityStatus: 'available',
         commissionRatePct: effectiveCommissionRatePct,
@@ -695,8 +726,10 @@ export const ListApartmentWizard: React.FC<ListApartmentWizardProps> = ({
           propertyRegistryNumber: propertyRegistryNumber.trim().slice(0, 60),
           titleDeedFileName: deedName.length >= 3 ? deedName : 'deed.pdf',
           titleDeedSha256: deedHash,
+          ...(titleDeedUrl ? { titleDeedUrl } : {}),
           utilityBillFileName: utilityName.length >= 3 ? utilityName : 'utility.pdf',
           utilityBillSha256: utilityHash,
+          ...(utilityBillUrl ? { utilityBillUrl } : {}),
           ownerIbanOrInstapay: ownerIbanOrInstapay.trim().slice(0, 80),
           digitalSignatureName: digitalSignatureName.trim().slice(0, 80),
           exclusivityClauseAccepted: true,

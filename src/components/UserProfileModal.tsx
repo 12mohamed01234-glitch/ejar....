@@ -189,6 +189,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [idFrontPhoto, setIdFrontPhoto] = useState<string | null>(landlordVerification?.nationalIdFrontUrl || null);
   const [idBackPhoto, setIdBackPhoto] = useState<string | null>(landlordVerification?.nationalIdBackUrl || null);
   const [isIdVerified, setIsIdVerified] = useState<boolean>(Boolean(landlordVerification));
+  const [isUploadingKycPhoto, setIsUploadingKycPhoto] = useState<boolean>(false);
+  const [kycUploadError, setKycUploadError] = useState<string | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState<boolean>(false);
 
   // Facial Liveness State
   const [isLivenessVerified, setIsLivenessVerified] = useState<boolean>(Boolean(landlordVerification?.facialMatchScore));
@@ -275,22 +278,40 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   // Real-time Egyptian National ID validation
   const idValidationResult = validateEgyptianNationalId(nationalIdText);
 
-  // Handle Upload Profile Photo to Supabase Storage
+  // Handle Upload Profile Photo to Supabase Storage (bucket: avatars)
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userData) return;
     setIsUploadingPhoto(true);
     setPhotoUploadMessage(null);
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
       const cleanUid = userData.uid.replace(/[^a-zA-Z0-9_-]/g, '_');
       const filePath = `${cleanUid}_${Date.now()}.${ext}`;
-      const { publicUrl, isFallback } = await uploadSupabaseFile('avatars', filePath, file);
-      
-      setProfilePhoto(publicUrl);
+      const { publicUrl } = await uploadSupabaseFile('avatars', filePath, file, {
+        maxWidth: 600,
+        maxHeight: 600,
+        quality: 0.82,
+      });
+
       const updated: UserAccountData = { ...userData, photoUrl: publicUrl };
-      
-      // Update app state & localStorage immediately across all fallback keys
+
+      // Persist publicUrl to Supabase Database (profiles table)
+      await upsertSupabaseProfile(updated);
+
+      // Sync with Supabase Auth metadata (best-effort for custom-auth sessions)
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            avatar_url: publicUrl,
+            photo_url: publicUrl,
+          },
+        });
+      } catch (authErr) {
+        console.warn('[Supabase Auth avatar metadata sync skipped]:', authErr);
+      }
+
+      setProfilePhoto(publicUrl);
       onUpdateUserData?.(updated);
       try {
         localStorage.setItem('ejar_custom_user', JSON.stringify(updated));
@@ -299,60 +320,71 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         if (userData.email) localStorage.setItem(`ejar_photo_${userData.email.toLowerCase()}`, publicUrl);
       } catch {}
 
-      // Persist to Supabase Database (profiles table)
-      try {
-        await upsertSupabaseProfile(updated);
-      } catch (dbErr) {
-        console.warn('[Profile DB save notice]:', dbErr);
-      }
-
-      // Sync with Supabase Auth metadata
-      try {
-        await supabase.auth.updateUser({
-          data: {
-            avatar_url: publicUrl,
-            photo_url: publicUrl,
-          },
-        });
-      } catch {}
-
       setPhotoUploadMessage(
-        isFallback
-          ? t('تم حفظ صورتك بنجاح ✓', 'Photo saved successfully ✓')
-          : t('تم رفع الصورة وحفظها على السحابة بنجاح ✓', 'Photo uploaded to cloud successfully ✓')
+        t('تم رفع الصورة الشخصية وحفظ الرابط في قاعدة البيانات بنجاح ✓', 'Profile photo uploaded & saved to database ✓')
       );
-    } catch {
-      setPhotoUploadMessage(t('حدث خطأ أثناء رفع الصورة، يرجى إعادة المحاولة', 'Error uploading image, please retry'));
+    } catch (err) {
+      console.error('[UserProfileModal] Avatar upload failed:', err);
+      setPhotoUploadMessage(
+        err instanceof Error
+          ? err.message
+          : t('حدث خطأ أثناء رفع الصورة إلى Supabase Storage', 'Failed to upload avatar to Supabase Storage')
+      );
     } finally {
       setIsUploadingPhoto(false);
+      if (e.target) e.target.value = '';
     }
   };
 
-  // Handle ID Front & Back Photo Upload to Supabase Storage
+  // Handle ID Front & Back Photo Upload to Supabase Storage (bucket: kyc-documents)
   const handleIdFrontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userData) return;
+    setIsUploadingKycPhoto(true);
+    setKycUploadError(null);
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
       const cleanUid = userData.uid.replace(/[^a-zA-Z0-9_-]/g, '_');
       const filePath = `kyc/${cleanUid}_id_front_${Date.now()}.${ext}`;
       const { publicUrl } = await uploadSupabaseFile('kyc-documents', filePath, file);
       setIdFrontPhoto(publicUrl);
       await updateSupabaseKycStatus(userData.uid, { nationalIdFrontUrl: publicUrl });
-    } catch {}
+    } catch (err) {
+      console.error('[UserProfileModal] KYC ID Front upload failed:', err);
+      setKycUploadError(
+        err instanceof Error
+          ? err.message
+          : t('فشل رفع صورة وجه البطاقة إلى Supabase Storage', 'Failed to upload ID front to Supabase Storage')
+      );
+    } finally {
+      setIsUploadingKycPhoto(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleIdBackUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !userData) return;
+    setIsUploadingKycPhoto(true);
+    setKycUploadError(null);
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
       const cleanUid = userData.uid.replace(/[^a-zA-Z0-9_-]/g, '_');
       const filePath = `kyc/${cleanUid}_id_back_${Date.now()}.${ext}`;
       const { publicUrl } = await uploadSupabaseFile('kyc-documents', filePath, file);
       setIdBackPhoto(publicUrl);
       await updateSupabaseKycStatus(userData.uid, { nationalIdBackUrl: publicUrl });
-    } catch {}
+    } catch (err) {
+      console.error('[UserProfileModal] KYC ID Back upload failed:', err);
+      setKycUploadError(
+        err instanceof Error
+          ? err.message
+          : t('فشل رفع صورة ظهر البطاقة إلى Supabase Storage', 'Failed to upload ID back to Supabase Storage')
+      );
+    } finally {
+      setIsUploadingKycPhoto(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleSaveBasicInfo = () => {
@@ -427,7 +459,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
-  const handleReceiptFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReceiptFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setUploadError(null);
     const file = e.target.files?.[0];
     if (!file) return;
@@ -435,11 +467,24 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setUploadError(t('يرجى اختيار ملف صورة صالح (PNG, JPG, JPEG)', 'Please choose a valid image file'));
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setReceiptScreenshot(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    setIsUploadingReceipt(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+      const cleanUid = userData.uid.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filePath = `receipts/${cleanUid}_${Date.now()}.${ext}`;
+      const { publicUrl } = await uploadSupabaseFile('kyc-documents', filePath, file);
+      setReceiptScreenshot(publicUrl);
+    } catch (err) {
+      console.error('[UserProfileModal] Receipt upload failed:', err);
+      setUploadError(
+        err instanceof Error
+          ? err.message
+          : t('فشل رفع صورة إيصال التحويل إلى التخزين السحابي.', 'Failed to upload receipt image to cloud storage.')
+      );
+    } finally {
+      setIsUploadingReceipt(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleUseMockReceipt = () => {
@@ -1087,35 +1132,50 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
                 <div className="grid grid-cols-2 gap-2 pt-2">
                   <div
-                    onClick={() => frontIdInputRef.current?.click()}
+                    onClick={() => !isUploadingKycPhoto && frontIdInputRef.current?.click()}
                     className="p-3 rounded-xl border border-dashed border-slate-300 hover:border-blue-500 bg-white cursor-pointer text-center space-y-1 transition-colors"
                   >
                     <Upload className="w-4 h-4 mx-auto text-blue-700" />
                     <span className="text-[11px] font-bold text-slate-800 block">
-                      {idFrontPhoto ? t('وجه البطاقة (تم الرفع) ✓', 'Front ID Uploaded ✓') : t('رفع صورة وجه البطاقة', 'Upload Front ID')}
+                      {isUploadingKycPhoto
+                        ? t('جاري الرفع...', 'Uploading...')
+                        : idFrontPhoto
+                          ? t('وجه البطاقة (تم الرفع) ✓', 'Front ID Uploaded ✓')
+                          : t('رفع صورة وجه البطاقة', 'Upload Front ID')}
                     </span>
                     {idFrontPhoto && (
                       <span className="text-[9px] text-emerald-700 font-medium block">
-                        {t('جاهز للفحص', 'Ready for validation')}
+                        {t('محفوظ في التخزين السحابي', 'Saved to Cloud Storage')}
                       </span>
                     )}
                   </div>
 
                   <div
-                    onClick={() => backIdInputRef.current?.click()}
+                    onClick={() => !isUploadingKycPhoto && backIdInputRef.current?.click()}
                     className="p-3 rounded-xl border border-dashed border-slate-300 hover:border-blue-500 bg-white cursor-pointer text-center space-y-1 transition-colors"
                   >
                     <Upload className="w-4 h-4 mx-auto text-blue-700" />
                     <span className="text-[11px] font-bold text-slate-800 block">
-                      {idBackPhoto ? t('ظهر البطاقة (تم الرفع) ✓', 'Back ID Uploaded ✓') : t('رفع صورة ظهر البطاقة', 'Upload Back ID')}
+                      {isUploadingKycPhoto
+                        ? t('جاري الرفع...', 'Uploading...')
+                        : idBackPhoto
+                          ? t('ظهر البطاقة (تم الرفع) ✓', 'Back ID Uploaded ✓')
+                          : t('رفع صورة ظهر البطاقة', 'Upload Back ID')}
                     </span>
                     {idBackPhoto && (
                       <span className="text-[9px] text-emerald-700 font-medium block">
-                        {t('جاهز للفحص', 'Ready for validation')}
+                        {t('محفوظ في التخزين السحابي', 'Saved to Cloud Storage')}
                       </span>
                     )}
                   </div>
                 </div>
+
+                {kycUploadError && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-800 flex items-center gap-2 mt-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>{kycUploadError}</span>
+                  </div>
+                )}
 
                 {!isIdVerified && idValidationResult.isValid && (
                   <button
@@ -1451,11 +1511,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 ) : (
                   <button
                     type="button"
+                    disabled={isUploadingReceipt}
                     onClick={() => receiptFileInputRef.current?.click()}
-                    className="w-full py-3 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg text-slate-700 text-center transition-colors flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-white hover:bg-slate-50 disabled:opacity-60 border border-slate-300 rounded-lg text-slate-700 text-center transition-colors flex items-center justify-center gap-2"
                   >
                     <Upload className="w-3.5 h-3.5 text-blue-700" />
-                    <span className="font-semibold text-[11px]">{t('اضغط هنا لاختيار سكرين شوت أو صورة الإيصال', 'Click to choose screenshot or receipt photo')}</span>
+                    <span className="font-semibold text-[11px]">
+                      {isUploadingReceipt
+                        ? t('جاري رفع الإيصال إلى التخزين السحابي...', 'Uploading receipt to cloud storage...')
+                        : t('اضغط هنا لاختيار سكرين شوت أو صورة الإيصال', 'Click to choose screenshot or receipt photo')}
+                    </span>
                   </button>
                 )}
 
