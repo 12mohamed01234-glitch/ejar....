@@ -2534,6 +2534,38 @@ export function App() {
     return supabaseBannedUsers.find((b) => b.userId === uid) || null;
   }, [myBanRecord, effectiveUser?.uid, supabaseBannedUsers]);
 
+  const handleOpenListingWizard = useCallback(() => {
+    if (!effectiveUser) {
+      showToast(
+        t(
+          'يرجى تسجيل الدخول أو إنشاء حساب على المنصة أولاً لعرض وحدة للإيجار.',
+          'Please sign in or create an account first to list a unit.'
+        )
+      );
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setActiveTab('list_unit');
+  }, [effectiveUser, showToast, t]);
+
+  const handleStartBooking = useCallback(
+    (apt: ApartmentRecord) => {
+      if (!effectiveUser) {
+        showToast(
+          t(
+            'يرجى تسجيل الدخول أو إنشاء حساب على المنصة أولاً لحجز الوحدة.',
+            'Please sign in or create an account first to book this unit.'
+          )
+        );
+        setIsAuthModalOpen(true);
+        return;
+      }
+      setActiveCheckoutRequest(null);
+      setCheckoutApartment(apt);
+    },
+    [effectiveUser, showToast, t]
+  );
+
   return (
     <FirestoreErrorBoundary>
       <div
@@ -2571,7 +2603,7 @@ export function App() {
 
                 <button
                   type="button"
-                  onClick={() => setActiveTab('list_unit')}
+                  onClick={handleOpenListingWizard}
                   className={`py-5 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap shrink-0 ${
                     activeTab === 'list_unit'
                       ? 'border-blue-700 text-blue-700'
@@ -2969,11 +3001,8 @@ export function App() {
                 onToggleFavorite={handleToggleFavorite}
                 onTogglePriceAlert={handleTogglePriceAlert}
                 onSelectApartment={(apt) => setSelectedApartment(apt)}
-                onRentApartment={(apt) => {
-                  setActiveCheckoutRequest(null);
-                  setCheckoutApartment(apt);
-                }}
-                onOpenListingWizard={() => setActiveTab('list_unit')}
+                onRentApartment={handleStartBooking}
+                onOpenListingWizard={handleOpenListingWizard}
               />
             )}
 
@@ -3022,13 +3051,17 @@ export function App() {
                 allReviews={mergedReviews}
                 togglingFavoriteId={togglingFavoriteId}
                 onRequestSignIn={handleSignIn}
-                onOpenListingWizard={() => setActiveTab('list_unit')}
+                onOpenListingWizard={handleOpenListingWizard}
                 onExploreMap={() => setActiveTab('explore')}
                 onOpenReviewModal={(booking) => setReviewModalBooking(booking)}
                 onRemoveFavorite={handleRemoveFavoriteById}
                 onTogglePriceAlert={handleTogglePriceAlert}
                 onSelectApartment={(apt) => setSelectedApartment(apt)}
                 onRentApartment={(apt, req) => {
+                  if (!effectiveUser) {
+                    handleStartBooking(apt);
+                    return;
+                  }
                   setActiveCheckoutRequest(req || null);
                   setCheckoutApartment(apt);
                 }}
@@ -3193,7 +3226,7 @@ export function App() {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('list_unit')}
+              onClick={handleOpenListingWizard}
               className={`flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
                 activeTab === 'list_unit' ? 'text-blue-700' : 'text-slate-500'
               }`}
@@ -3270,8 +3303,7 @@ export function App() {
             onClose={() => setSelectedApartment(null)}
             onProceedToRent={(apt) => {
               setSelectedApartment(null);
-              setActiveCheckoutRequest(null);
-              setCheckoutApartment(apt);
+              handleStartBooking(apt);
             }}
             onOpenChat={(apt) => {
               if (!isBlueVerified) {
